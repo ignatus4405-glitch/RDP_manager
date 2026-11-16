@@ -207,6 +207,7 @@ jobs:
               exit $code
             }
             Move-Item "$STAGE/RDPManager-Server-Setup-$VER.exe" "server/dist/"
+            Remove-Item "server/dist/rdp-manager-server.exe" -Force
             Get-ChildItem "server/dist"
           } catch {
             Write-Host "::error::NSIS packaging failed: $($_.Exception.Message)"
@@ -225,6 +226,7 @@ jobs:
           cp server/installer/linux/install.sh server/installer/linux/uninstall.sh server/installer/linux/rdp-manager-server.service "$PKG/"
           chmod 755 "$PKG/rdp-manager-server" "$PKG/install.sh" "$PKG/uninstall.sh"
           tar -C server/dist/pkg -czf "server/dist/RDPManager-Server-${VER}-linux-x64.tar.gz" rdp-manager-server
+          rm -f server/dist/rdp-manager-server
           ls -la server/dist/
 
       - name: Артефакты серверного установщика
@@ -232,8 +234,8 @@ jobs:
         with:
           name: server-installers-${{ matrix.os }}
           path: |
-            server/dist/*.exe
-            server/dist/*.tar.gz
+            server/dist/RDPManager-Server-Setup-*.exe
+            server/dist/RDPManager-Server-*-linux-x64.tar.gz
           retention-days: 14
           if-no-files-found: warn
 
@@ -245,5 +247,5 @@ jobs:
           name: RDP Manager ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            server/dist/*.exe
-            server/dist/*.tar.gz
+            server/dist/RDPManager-Server-Setup-*.exe
+            server/dist/RDPManager-Server-*-linux-x64.tar.gz
