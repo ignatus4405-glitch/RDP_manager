@@ -1,0 +1,17 @@
+{
+  "name": "rdp-manager-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Серверная часть RDP Manager: база подключений RDP / AnyDesk / RustDesk, документация, учётные записи администраторов",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

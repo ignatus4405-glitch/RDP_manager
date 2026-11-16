@@ -1,0 +1,19 @@
+{
+  "name": "rdp-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RDP Manager — централизованное хранилище RDP / AnyDesk / RustDesk подключений с документацией",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "setup": "npm install",
+    "server": "npm run start --workspace server",
+    "client": "npm run start --workspace client",
+    "dist": "npm run dist --workspace client"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
