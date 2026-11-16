@@ -6,6 +6,13 @@
 на основе [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) — вручную редактировать не нужно,
 если запись создаётся релиз-PR (см. CONTRIBUTING.md).
 
+## [Unreleased]
+
+### Исправлено
+- CI Build: публикация релиза перенесена с `electron-builder --publish` на `softprops/action-gh-release` (убрана гонка матрицы Windows/Linux и нестабильность publish); `latest(-linux).yml` генерируется отдельным скриптом `client/scripts/make-latest-yml.js`.
+- Смоук-тест сервера: на Windows ждём выхода дочернего процесса перед удалением временной папки SQLite (иначе EPERM/EBUSY); при падении сервера его лог выводится в ошибку.
+- Build запускается на каждый push любой ветки, а не только `main`/теги.
+
 ## [1.1.0] - 2026-11-16
 
 ### Добавлено

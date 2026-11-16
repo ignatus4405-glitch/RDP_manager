@@ -18,7 +18,8 @@ RDP Manager — система единого доступа к инфрастр
 | `npm run check` | `node --check` для всех JS |
 | `npm test` | смоук-тест сервера (`server/test/smoke.test.js`, node:test) |
 | `npm run dist` | сборка установщиков в `client/dist/` |
-| `npm run dist:publish` | сборка + публикация в GitHub Release (используется в CI на тегах v*) |
+| `npm run dist` | сборка установщиков в `client/dist/` |
+| `node client/scripts/make-latest-yml.js` | генерация `latest(-linux).yml` для автообновления (CI делает сам на тегах) |
 
 ## Карта файлов
 ```
@@ -52,7 +53,7 @@ release-please-config.json / .release-please-manifest.json — авто-верс
 5. **Токены**: секрет подписи лежит в `server/data/secret.key` (создаётся при первом старте, НЕ коммитится; можно переопределить env `RDP_MANAGER_SECRET`). Если ключ удалить — все выданные токены перестанут быть валидными, пользователи просто войдут заново.
 6. **БД и `must_change_password`**: свежий сервер всегда создаёт `admin/admin123` с обязательной сменой. Не коммитьте `server/data/`.
 7. **Версии**: руками не бампить (release-please), кроме синхронной подготовки `chore: release`.
-8. **electron-builder publish на матрице (Windows+Linux параллельно)** — оба джоба пишут в один Release; штатно работает, при гонке за создание релиза electron-builder переиспользует существующий.
+8. **Публикация релиза** — `softprops/action-gh-release` на теге `v*` (НЕ `electron-builder --publish`): матрица Windows/Linux пишет в один Release без гонок; `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js` (sha512 + size, формат electron-updater).
 9. **Приватный репозиторий**: автообновление клиентов не скачает установщик анонимно — см. CONTRIBUTING.md.
 10. **Аудит**: `npm audit` показывает moderate (minimatch, build-time цепочка electron-builder) — осознанно не блокируем CI; новые high+ уязвимости чините.
 

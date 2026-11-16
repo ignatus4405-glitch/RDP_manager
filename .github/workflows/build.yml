@@ -1,20 +1,18 @@
 name: Build
 
-# Автосборка установщиков:
-#  - push в main       → сборка + артефакты (проверка, что main собирается)
-#  - push тега v*      → сборка + ПУБЛИКАЦИЯ в GitHub Release (это и есть автообновление клиентов)
-#  - PR в main         → сборка + артефакты (проверка перед мержем)
-#  - вручную           → workflow_dispatch
+# Автосборка установщиков ПОСЛЕ КАЖДОГО изменения:
+#  - любой push (ветки и теги) → сборка + артефакты
+#  - PR в main                → сборка + артефакты (проверка перед мержем)
+#  - тег v*                   → + публикация установщиков и latest*.yml в GitHub Release
+#  - вручную                  → workflow_dispatch
 on:
   push:
-    branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write   # нужно electron-builder для создания/наполнения Release на тегах
+  contents: write   # публикация релиза на тегах
 
 jobs:
   build:
@@ -37,23 +35,28 @@ jobs:
           cache: npm
 
       - name: Установка зависимостей
+        shell: bash
         run: npm ci
 
-      - name: Проверка и тесты
-        run: npm run check && npm test
-
-      - name: Сборка (и публикация в Release при пуше тега v*)
+      - name: Синтаксическая проверка
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "Тег ${GITHUB_REF_NAME} — собираю и публикую в GitHub Release"
-            npm run dist:publish --workspace client
-          else
-            echo "Ветка ${GITHUB_REF_NAME} — собираю без публикации"
-            npm run dist --workspace client
-          fi
+        run: npm run check
+
+      - name: Смоук-тесты сервера
+        shell: bash
+        run: npm test
+
+      - name: Сборка установщика (electron-builder, без публикации)
+        shell: bash
+        run: npm run dist --workspace client
+
+      - name: Генерация latest.yml для автообновления
+        shell: bash
+        run: node client/scripts/make-latest-yml.js
+
+      - name: Содержимое client/dist (для диагностики)
+        shell: bash
+        run: ls -la client/dist
 
       - name: Артефакты сборки
         uses: actions/upload-artifact@v4
@@ -61,8 +64,23 @@ jobs:
           name: installers-${{ matrix.os }}
           path: |
             client/dist/*.exe
+            client/dist/*.exe.blockmap
             client/dist/*.AppImage
+            client/dist/*.AppImage.blockmap
             client/dist/latest*.yml
-            client/dist/*.blockmap
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Публикация в GitHub Release (только на тегах v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RDP Manager ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            client/dist/*.exe
+            client/dist/*.exe.blockmap
+            client/dist/*.AppImage
+            client/dist/*.AppImage.blockmap
+            client/dist/latest*.yml

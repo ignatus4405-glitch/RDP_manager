@@ -28,7 +28,7 @@ Scopes: `server`, `client`, `ci`, `docs` — придерживаться сущ
 1. Коммиты попадают в `main` (через PR).
 2. **release-please** (`.github/workflows/release.yml`) открывает/обновляет **Release PR**: bump версий в `package.json` (root, `client`, `server`) и `CHANGELOG.md`.
 3. Мерж Release PR → создаётся тег `vX.Y.Z` и GitHub Release.
-4. Тег запускает **Build** (`.github/workflows/build.yml`): Windows NSIS + Linux AppImage собираются и публикуются в тот же Release вместе с `latest.yml`.
+4. Тег запускает **Build** (`.github/workflows/build.yml`): Windows NSIS + Linux AppImage собираются, генерируются `latest(-linux).yml`, всё это публикуется в тот же Release (softprops/action-gh-release).
 5. Клиенты на предыдущей версии при старте / раз в 6 ч видят баннер «Доступна новая версия…»; в собранном приложении обновление скачивается тихо и ставится по кнопке или при выходе.
 
 Ручной релиз (если автоматика недоступна):

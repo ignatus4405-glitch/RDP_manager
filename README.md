@@ -40,7 +40,7 @@ RDP_manager/
 | Workflow | Когда запускается | Что делает |
 |----------|-------------------|------------|
 | **CI** (`ci.yml`) | каждый push (любая ветка) и PR | `node --check` всех JS, смоук-тесты сервера, проверка electron-builder |
-| **Build** (`build.yml`) | push в `main`, тег `v*`, PR в `main`, вручную | сборка установщиков **Windows NSIS** и **Linux AppImage**; на теге `v*` — публикация в GitHub Release вместе с `latest.yml` |
+| **Build** (`build.yml`) | любой push (ветки и теги), PR в `main`, вручную | сборка установщиков **Windows NSIS** и **Linux AppImage**; генерация `latest(-linux).yml`; на теге `v*` — публикация в GitHub Release (softprops/action-gh-release) |
 | **Release Please** (`release.yml`) | push в `main` | автоматический Release PR с bump версии и CHANGELOG по Conventional Commits; мерж создаёт тег и релиз |
 
 **Как выйти новая версия (полностью автоматически):**

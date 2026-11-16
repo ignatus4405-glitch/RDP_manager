@@ -46,12 +46,23 @@ test('server smoke: health → login → CRUD → защита доступа', 
       stdio: ['ignore', 'pipe', 'pipe'],
     }
   );
-  t.after(() => {
+  let childLog = '';
+  child.stdout.on('data', (d) => { childLog += d; });
+  child.stderr.on('data', (d) => { childLog += d; });
+  t.after(async () => {
     child.kill('SIGTERM');
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    // Ждём выхода процесса — на Windows иначе файлы SQLite остаются залоченными
+    await Promise.race([
+      new Promise((r) => child.once('exit', r)),
+      new Promise((r) => setTimeout(r, 5000)),
+    ]);
+    for (let i = 0; i < 5; i++) {
+      try { fs.rmSync(dataDir, { recursive: true, force: true }); break; } catch { await new Promise((r) => setTimeout(r, 200)); }
+    }
+    if (process.env.DEBUG_SMOKE) console.log('--- server log ---\n' + childLog);
   });
 
-  assert.ok(await waitForServer(base), 'сервер не поднялся за отведённое время');
+  assert.ok(await waitForServer(base), 'сервер не поднялся за отведённое время. Лог сервера:\n' + childLog);
 
   const post = (url, body, token) =>
     fetch(base + url, {
