@@ -19,18 +19,22 @@
 RDP_manager/
 ├── server/                 # Серверная часть (Node.js + Express + SQLite)
 │   ├── src/
-│   │   ├── index.js        # Точка входа: HTTP-сервер, раздача панели и веб-клиента
+│   │   ├── index.js        # Точка входа: HTTP-сервер, раздача панели и веб-клиента, RDP-шлюз
 │   │   ├── api.js          # REST API: auth, пользователи, подключения, документы, статистика
 │   │   ├── db.js           # SQLite (node:sqlite), схема БД, scrypt-хеши, первичный admin
-│   │   └── auth.js         # HMAC-JWT токены, middleware авторизации и ролей
+│   │   ├── auth.js         # HMAC-JWT токены, middleware авторизации и ролей
+│   │   └── rdp-gateway.js  # RDCleanPath-шлюз (WebSocket /ws/rdp → TCP/TLS → RDP), JWT + allowlist по БД
 │   ├── web/index.html      # Встроенная веб-панель администратора (создание админов и пр.)
 │   ├── scripts/build-sea.js  # Однофайловый SEA-бинарник сервера (esbuild + postject)
 │   ├── installer/          # Установщики сервера: windows/installer.nsi, linux/install.sh + systemd-юнит
 │   └── data/               # Создаётся при первом запуске: rdp-manager.db, secret.key (в .gitignore)
 ├── client/                 # Десктоп-клиент (Electron)
-│   ├── main.js             # Главный процесс: окно + запуск mstsc / AnyDesk / RustDesk
+│   ├── main.js             # Главный процесс: окно + mstsc / внешний запуск AnyDesk / RustDesk
 │   ├── preload.js          # Безопасный IPC-мост (contextIsolation)
 │   ├── renderer/           # UI: index.html, styles.css, app.js, md.js (Markdown)
+│   │   ├── ironrdp-entry.mjs # Вход ironrdp-бандла (IronRDP WASM + wasm как data:URL)
+│   │   └── vendor/         # Собирается scripts/build-ironrdp.js (в .gitignore)
+│   ├── scripts/build-ironrdp.js  # Сборка vendor/ironrdp/bundle.js (esbuild, IIFE)
 │   └── assets/icon.png     # Иконка приложения
 └── package.json            # npm workspaces: server + client
 ```
@@ -128,6 +132,7 @@ npm run dist         # client → electron-builder (Windows: NSIS, Linux: AppIma
 - Вход под своей учётной записью
 - Поиск по подключениям: название, адрес, описание, теги; фильтры по типу (RDP/AnyDesk/RustDesk), категории и тегу; счётчики
 - Запуск подключения в один клик («Подключить →»)
+- **RDP открывается прямо в окне приложения** — встроенная сессия на canvas (IronRDP WASM + WebSocket-шлюз на сервере), как в Remote Desktop Manager: клавиатура, мышь, колёсико, буфер обмена; отдельное окно mstsc не нужно
 - Чтение документации (Markdown) с поиском и разделами
 - Смена собственного пароля
 
@@ -138,13 +143,21 @@ npm run dist         # client → electron-builder (Windows: NSIS, Linux: AppIma
 
 ## Как выполняется подключение
 
-| Тип | Windows | Linux |
-|-----|---------|-------|
-| RDP | `mstsc.exe /v:<адрес>[:port] [/u:user]` | `xfreerdp3` → `xfreerdp` → `remmina` (что найдётся в PATH) |
-| AnyDesk | `"AnyDesk.exe" <id>` (из Program Files), иначе `anydesk:<id>` | `anydesk <id>`, иначе `anydesk:<id>` |
-| RustDesk | `rustdesk --connect <id>`, иначе `rustdesk://<id>` | `rustdesk --connect <id>`, иначе `rustdesk://<id>` |
+**RDP** (основной сценарий) — встроенная сессия в окне приложения:
 
-Пароли от самих подключений в базе не хранятся (только при необходимости логин) — их вводит пользователь в самом RDP/AnyDesk/RustDesk-клиенте.
+1. Нажмите «Подключить →» на RDP-карточке → откроется полноэкранный режим с запросом пароля (логин подставляется из карточки, пароль нигде не хранится).
+2. Клиент (IronRDP WASM) туннелирует RDP через сервер по WebSocket `ws://<сервер>/ws/rdp` (протокол RDCleanPath) — **сервер должен иметь сетевой доступ к RDP-узлу**. Поддерживаются CredSSP/NLA; рисуется рабочий стол, работают клавиатура/мышь/колёсико и буфер обмена (текст).
+3. Кнопка «Во внешнем клиенте» в той же панели запускает системный клиент (`mstsc` / `xfreerdp` / `remmina`), если встроенный по каким-то причинам не подходит.
+
+Шлюз на сервере принимает только подключения из базы: destination из RDCleanPath-запроса сверяется с RDP-записями (host:port, порт по умолчанию 3389); JWT обязателен. Пароли через шлюз не проходят и не логируются.
+
+| Тип | Основной способ | Внешний клиент |
+|-----|-----------------|----------------|
+| RDP | **встроенное окно** (IronRDP WASM → `/ws/rdp`) | Windows: `mstsc.exe /v:<адрес>[:port] [/u:user]`; Linux: `xfreerdp3` → `xfreerdp` → `remmina` |
+| AnyDesk | `"AnyDesk.exe" <id>` (Windows), `anydesk <id>` (Linux), иначе `anydesk:<id>` | — |
+| RustDesk | `rustdesk --connect <id>`, иначе `rustdesk://<id>` | — |
+
+Пароли от самих подключений в базе не хранятся (только при необходимости логин) — для встроенного RDP пароль вводится в форме подключения и используется только для этой сессии.
 
 ## REST API (кратко)
 
@@ -190,6 +203,7 @@ DELETE /api/documents/:id                 удалить                    (adm
 
 - Пароли хешируются **scrypt** (N=16384) с индивидуальной солью, сравнение через `timingSafeEqual`
 - Токены — HMAC-SHA256 JWT, секрет хранится в `data/secret.key` (chmod 600) и переживает перезапуск
+- RDP-шлюз (`/ws/rdp`): только с валидным JWT; цель из RDCleanPath-запроса обязана совпадать с RDP-подключением из БД (host:port) — открытым релеем шлюз не является; CredSSP/NLA выполняет сам WASM-клиент, пароль RDP через шлюз не логируется
 - Новые учётные записи и сброшенные пароли требуют смены при первом входе
 - Администратор не может отключить, понизить или удалить **себя**
 - Рендерер клиента: `contextIsolation`, без `nodeIntegration`, CSP, весь пользовательский HTML экранируется
@@ -223,7 +237,9 @@ xcopy C:\RDP_manager\server\data D:\backup\rdp-manager /E /Y
 ## Статус реализации / ограничения
 
 - Проверено end-to-end: API (авторизация, CRUD подключений/документов/пользователей, поиск, фильтры), запуск сервера, веб-панель и веб-режим клиента — `http://<IP>:8720/app/`. Смоук-тесты сервера зелёные (`npm test`).
+- **Встроенная RDP-сессия**: протокол IronRDP (WASM) покрывает RDP 5–8 + CredSSP/NLA; экзотические конфигурации (RD Gateway, RemoteFX, smartcard) не гарантируются — в этом случае используйте «Во внешнем клиенте». Графическая часть встроенной сессии проверяется только на реальной машине с RDP-узлом; логика шлюза покрыта unit-тестами (`server/test/rdp-gateway.test.js`).
 - Графический интерфейс клиента реализован на Electron; бинарник Electron намеренно не входит в репозиторий (ставится через `npm install`).
 - Автообновление клиента требует опубликованного GitHub Release с установщиками и `latest.yml`; появляется после мержа Release PR (см. выше). В приватном репозитории автообновление не скачает релиз анонимно — см. `CONTRIBUTING.md`.
 - RustDesk и AnyDesk запускаются как внешние программы — они должны быть установлены на клиентском ПК.
-- Пароли RDP/AnyDesk/RustDesk не хранятся и не передаются через сервер.
+- Пароли RDP/AnyDesk/RustDesk не хранятся и не передаются через сервер; пароль для встроенной сессии вводится каждый раз в форме подключения.
+- RDP-шлюз работает через **сервер**, а не напрямую с клиентского ПК: сервер должен маршрутизировать RDP (TCP 3389/3390…) к целевым узлам. Если сервер такой доступ не имеет, используйте внешний клиент.

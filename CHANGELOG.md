@@ -6,6 +6,17 @@
 на основе [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) — вручную редактировать не нужно,
 если запись создаётся релиз-PR (см. CONTRIBUTING.md).
 
+## [Unreleased]
+
+### Добавлено
+- **Встроенная RDP-сессия прямо в окне приложения — как в Remote Desktop Manager.** RDP больше не требует отдельного окна mstsc/remmina:
+  - Клиент: полноэкранный режим `#rdpOverlay` (имя узла, статус, «Во внешнем клиенте», «Отключиться», растяжение canvas). Кнопка «Подключить →» на RDP-карточке открывает форму (логин из карточки, пароль вводится каждый раз и нигде не хранится) → сессия на `<canvas>` через **IronRDP WASM** (CredSSP/NLA): рабочий стол, клавиатура (PS/2-сканкоды, не зависит от раскладки), мышь, колёсико, текстовый буфер обмена в обе стороны. Размер десктопа — по размеру окна (чётные, ≤1920×1080). Ошибки маппятся (`WrongPassword`, `LogonFailure`, `AccessDenied`, `NegotiationFailure`, шлюз недоступен / цель отклонена).
+  - Сервер: **RDCleanPath-шлюз** (`server/src/rdp-gateway.js`) на WebSocket `/ws/rdp?token=<JWT>` (новый dependency `ws`): ASN.1 DER поверх WS → TCP/X.224 → TLS (самоподписанные RDP-сертификаты принимаются) → ретрансляция. Allowlist: destination обязан совпадать с RDP-подключением в БД (host:port, дефолт 3389, host без учёта регистра и завершающей точки) — шлюз не открытый релей. Пароли не логируются. Unit-тесты: `server/test/rdp-gateway.test.js` (парсинг destination, allowlist, DER, аутентификация upgrade 401/101).
+  - Сборка: `client/renderer/ironrdp-entry.mjs` + `client/scripts/build-ironrdp.js` (esbuild → IIFE, WASM инлайнится как `data:` URL — работает с `file://` в Electron). `vendor/ironrdp/bundle.js` не коммитится, собирается автоматически из `npm run dist` (в CI — тем же шагом). CSP клиента дополнен `wasm-unsafe-eval` и `ws:`/`wss:`.
+  - «Во внешнем клиенте» (mstsc / remmina / xfreerdp) по-прежнему доступна из панели встроенной сессии.
+  - Требование изменилось: RDP-трафик идёт через сервер — серверу нужен сетевой доступ к RDP-узлам; без него используйте внешний клиент.
+  - SEA-сборка и установщики сервера включают шлюз автоматически (esbuild-бандл); проверено на SEA-бинаре (health/login/WS upgrade 101).
+
 ## [1.2.1] - 2026-11-16
 
 ### Исправлено
