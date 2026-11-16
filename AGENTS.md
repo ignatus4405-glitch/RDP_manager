@@ -53,7 +53,7 @@ release-please-config.json / .release-please-manifest.json — авто-верс
 5. **Токены**: секрет подписи лежит в `server/data/secret.key` (создаётся при первом старте, НЕ коммитится; можно переопределить env `RDP_MANAGER_SECRET`). Если ключ удалить — все выданные токены перестанут быть валидными, пользователи просто войдут заново.
 6. **БД и `must_change_password`**: свежий сервер всегда создаёт `admin/admin123` с обязательной сменой. Не коммитьте `server/data/`.
 7. **Версии**: руками не бампить (release-please), кроме синхронной подготовки `chore: release`.
-8. **Публикация релиза** — `softprops/action-gh-release` на теге `v*` (НЕ `electron-builder --publish`): матрица Windows/Linux пишет в один Release без гонок; `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js` (sha512 + size, формат electron-updater).
+8. **Публикация релиза** — `softprops/action-gh-release` на теге `v*` (НЕ `electron-builder --publish`): матрица Windows/Linux пишет в один Release без гонок; `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js` (sha512 + size, формат electron-updater). **Секция `publish` в `build` клиента отсутствует намеренно** — при её наличии electron-builder требует GH_TOKEN даже при `--publish never`.
 9. **Приватный репозиторий**: автообновление клиентов не скачает установщик анонимно — см. CONTRIBUTING.md.
 10. **Аудит**: `npm audit` показывает moderate (minimatch, build-time цепочка electron-builder) — осознанно не блокируем CI; новые high+ уязвимости чините.
 11. **electron — только в devDependencies и ТОЧНАЯ версия** (без `^`): иначе electron-builder мгновенно падает («only allowed in devDependencies» / «version is a range»). Версия electron должна совпадать с той, что скачана в node_modules.

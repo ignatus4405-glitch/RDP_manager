@@ -39,14 +39,7 @@
       "category": "Utility",
       "icon": "assets/icon.png",
       "artifactName": "RDPManager-${version}.${ext}"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "ignatus4405-glitch",
-        "repo": "RDP_manager"
-      }
-    ]
+    }
   },
   "engines": {
     "node": ">=22.5.0"

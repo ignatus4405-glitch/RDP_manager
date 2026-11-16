@@ -10,7 +10,7 @@
 
 ### Исправлено
 - Сборка клиента (electron-builder): `electron` перенесён из `dependencies` в `devDependencies` (раньше билд падал мгновенно с «Package electron is only allowed in devDependencies»); версия Electron закреплена точно (`45.3.3`, без `^`) — electron-builder требует exact version. Добавлены `author` и `license` (убраны предупреждения).
-- CI Build: публикация релиза перенесена с `electron-builder --publish` на `softprops/action-gh-release` (убрана гонка матрицы Windows/Linux и нестабильность publish); `latest(-linux).yml` генерируется отдельным скриптом `client/scripts/make-latest-yml.js`.
+- CI Build: публикация релиза перенесена с `electron-builder --publish` на `softprops/action-gh-release` (убрана гонка матрицы Windows/Linux и нестабильность publish); `latest(-linux).yml` генерируется отдельным скриптом `client/scripts/make-latest-yml.js`. Из `client/package.json` удалена секция `publish` — из-за неё electron-builder требовал GH_TOKEN даже при `--publish never` (сборка падала именно с этой ошибкой).
 - Смоук-тест сервера: на Windows ждём выхода дочернего процесса перед удалением временной папки SQLite (иначе EPERM/EBUSY); при падении сервера его лог выводится в ошибку.
 - Build запускается на каждый push любой ветки, а не только `main`/теги.
 
