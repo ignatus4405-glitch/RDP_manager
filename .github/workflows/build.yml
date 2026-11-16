@@ -159,26 +159,44 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress | Out-Null
-          $VER = node -p "require('./package.json').version"
-          $STAGE = "server/dist/stage"
-          New-Item -ItemType Directory -Force $STAGE | Out-Null
-          Copy-Item "server/dist/rdp-manager-server.exe" $STAGE
-          Copy-Item -Recurse "server/web" "$STAGE/web"
-          Copy-Item "server/installer/windows/installer.nsi" $STAGE
-          $maker = "${env:ProgramFilesX86}\NSIS\makensis.exe"
-          if (!(Test-Path $maker)) { $maker = "makensis" }
-          Push-Location $STAGE
-          & $maker "/DVERSION=$VER" "installer.nsi" *> "makensis.log"
-          $code = $LASTEXITCODE
-          Pop-Location
-          if ($code -ne 0) {
-            Get-Content "$STAGE/makensis.log" | Select-Object -Last 40
-            Get-Content "$STAGE/makensis.log" | Select-Object -Last 8 | ForEach-Object { Write-Host "::error::$_" }
+          $ErrorActionPreference = 'Stop'
+          try {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install nsis вернул код $LASTEXITCODE" }
+
+            $candidates = @(
+              "${env:ProgramFilesX86}\NSIS\makensis.exe",
+              "${env:ProgramFiles}\NSIS\makensis.exe",
+              "${env:ChocolateyInstall}\lib\nsis\tools\makensis.exe"
+            ) | Where-Object { Test-Path $_ }
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) { $candidates += $cmd.Source }
+            if (-not $candidates) { throw 'makensis не найден ни в одном ожидаемом месте после choco install nsis' }
+            $maker = $candidates[0]
+            Write-Host "makensis: $maker"
+
+            $VER = node -p "require('./package.json').version"
+            $STAGE = "server/dist/stage"
+            New-Item -ItemType Directory -Force $STAGE | Out-Null
+            Copy-Item "server/dist/rdp-manager-server.exe" $STAGE
+            Copy-Item -Recurse "server/web" "$STAGE/web"
+            Copy-Item "server/installer/windows/installer.nsi" $STAGE
+
+            Push-Location $STAGE
+            & $maker "/DVERSION=$VER" "installer.nsi" *> "makensis.log"
+            $code = $LASTEXITCODE
+            Pop-Location
+            Get-Content "$STAGE/makensis.log" | Select-Object -Last 15
+            if ($code -ne 0) {
+              Get-Content "$STAGE/makensis.log" | Select-Object -Last 8 | ForEach-Object { Write-Host "::error::$_" }
+              exit $code
+            }
+            Move-Item "$STAGE/RDPManager-Server-Setup-$VER.exe" "server/dist/"
+            Get-ChildItem "server/dist"
+          } catch {
+            Write-Host "::error::NSIS packaging failed: $($_.Exception.Message)"
             exit 1
           }
-          Move-Item "$STAGE/RDPManager-Server-Setup-$VER.exe" "server/dist/"
-          Get-ChildItem "server/dist"
 
       - name: Упаковка Linux-установщика (tar.gz)
         if: runner.os == 'Linux'
