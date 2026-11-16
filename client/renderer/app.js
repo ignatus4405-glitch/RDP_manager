@@ -275,6 +275,35 @@ const rdpConnAddress = (conn) =>
 
 const rdpGatewayBase = () => `${state.serverUrl.replace(/^http(s?)/, 'ws$1')}/ws/rdp`;
 
+/** Простейшее сравнение версий '1.3.0' < '1.4.0' → true */
+function rdpSemverLt(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
+  }
+  return false;
+}
+
+/**
+ * Предполетная проверка сервера: шлюз /ws/rdp появился в v1.3.0.
+ * Возвращает строку с проблемой или null, если всё ок.
+ */
+async function rdpPreflight() {
+  try {
+    const res = await fetch(`${state.serverUrl}/api/health`);
+    if (!res.ok) return null; // health не отвечает — разберётся основной поток
+    const data = await res.json().catch(() => null);
+    const ver = String(data?.version || '').trim();
+    if (ver && rdpSemverLt(ver, '1.3.0')) {
+      return `Сервер RDP Manager v${ver} не поддерживает встроенный RDP: шлюз /ws/rdp появился в v1.3.0. Обновите сервер до актуальной версии или используйте «Во внешнем клиенте».`;
+    }
+    return null;
+  } catch {
+    return null; // сеть/CORS — основной поток сам покажет ошибку
+  }
+}
+
 function setRdpStatus(text, kind = 'idle') {
   const el = $('rdpStatus');
   el.textContent = text;
@@ -295,7 +324,7 @@ function rdpErrorText(err) {
       if (kind === 2) return 'Вход на компьютер отклонён: пользователь или пароль не подошёл.';
       if (kind === 3) return 'Недостаточно прав для входа на этот узел (AccessDenied).';
       if (kind === 4) return 'Шлюз RDP Manager вернул ошибку (RDCleanPath). Проверьте, что узел есть в базе и сервер видит его по сети.';
-      if (kind === 5) return 'Не удалось подключиться к RDP-шлюзу на сервере. Проверьте, что сервер запущен и доступен по сети.';
+      if (kind === 5) return `Не удалось подключиться к RDP-шлюзу (${rdpGatewayBase()}). Убедитесь, что сервер обновлён до v1.3.0+, шлюз /ws/rdp доступен, и ни один прокси/фаервол перед сервером не режет WebSocket (Upgrade). Либо используйте «Во внешнем клиенте».`;
       if (kind === 6) return 'Не удалось согласовать параметры RDP (NegotiationFailure). Узел требует NLA/TLS, не является RDP-сервером или не отвечает.';
     }
   } catch { /* не IronError — отдаём message */ }
@@ -453,6 +482,16 @@ async function startEmbeddedRdp() {
   const connectBtn = $('rdpConnectBtn');
   connectBtn.disabled = true;
   const destination = rdpConnAddress(conn);
+
+  // Предполетная проверка версии сервера (/ws/rdp есть только в v1.3.0+)
+  const preflightProblem = await rdpPreflight();
+  if (preflightProblem) {
+    formError.textContent = preflightProblem;
+    setRdpStatus('Сервер слишком старый', 'error');
+    connectBtn.disabled = false;
+    return;
+  }
+  console.log(`[rdp] шлюз: ${rdpGatewayBase()}, цель: ${destination}`);
 
   try {
     const IronRDP = window.IronRDP;
