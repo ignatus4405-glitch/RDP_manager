@@ -56,6 +56,8 @@ release-please-config.json / .release-please-manifest.json — авто-верс
 8. **Публикация релиза** — `softprops/action-gh-release` на теге `v*` (НЕ `electron-builder --publish`): матрица Windows/Linux пишет в один Release без гонок; `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js` (sha512 + size, формат electron-updater).
 9. **Приватный репозиторий**: автообновление клиентов не скачает установщик анонимно — см. CONTRIBUTING.md.
 10. **Аудит**: `npm audit` показывает moderate (minimatch, build-time цепочка electron-builder) — осознанно не блокируем CI; новые high+ уязвимости чините.
+11. **electron — только в devDependencies и ТОЧНАЯ версия** (без `^`): иначе electron-builder мгновенно падает («only allowed in devDependencies» / «version is a range»). Версия electron должна совпадать с той, что скачана в node_modules.
+12. **electron-updater в dependencies** клиента (не dev) — он нужен в собранном приложении. `electron-builder` и `electron` — devDependencies.
 
 ## После внесения изменений (чеклист агента)
 1. `npm run check && npm test` — зелёные.

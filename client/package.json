@@ -9,10 +9,10 @@
     "dist": "electron-builder"
   },
   "dependencies": {
-    "electron": "^45.3.3",
     "electron-updater": "^6.8.11"
   },
   "devDependencies": {
+    "electron": "45.3.3",
     "electron-builder": "^26.18.0"
   },
   "build": {
@@ -50,5 +50,9 @@
   },
   "engines": {
     "node": ">=22.5.0"
-  }
+  },
+  "author": {
+    "name": "RDP Manager Team"
+  },
+  "license": "UNLICENSED"
 }
