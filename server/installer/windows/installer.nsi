@@ -1,6 +1,6 @@
 ﻿; ============================================================
 ;  RDP Manager Server — установщик для Windows (NSIS)
-;  Собирается в CI: makensis /DVERSION=1.3.1 installer.nsi
+;  Собирается в CI: makensis /DVERSION=1.3.2 installer.nsi
 ;  Ожидает в своей папке:
 ;    rdp-manager-server.exe  — однофайловый SEA-бинарь сервера
 ;    web/                    — веб-панель администратора
@@ -9,7 +9,7 @@ Unicode true
 !include "MUI2.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.3.1"
+  !define VERSION "1.3.2"
 !endif
 !define APP_NAME   "RDP Manager Server"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPManagerServer"
