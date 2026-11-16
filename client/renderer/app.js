@@ -273,7 +273,12 @@ const rdpSession = {
 const rdpConnAddress = (conn) =>
   `${conn.address}${conn.type === 'rdp' && conn.port && conn.port !== 3389 ? ':' + conn.port : ''}`;
 
+// Чистый базовый URL (для логов и сообщений — без токена)
 const rdpGatewayBase = () => `${state.serverUrl.replace(/^http(s?)/, 'ws$1')}/ws/rdp`;
+
+// Фактический URL для WebSocket: шлюз аутентифицирует upgrade по ?token=<JWT>
+const rdpGatewayUrl = () =>
+  state.token ? `${rdpGatewayBase()}?token=${encodeURIComponent(state.token)}` : rdpGatewayBase();
 
 /** Простейшее сравнение версий '1.3.0' < '1.4.0' → true */
 function rdpSemverLt(a, b) {
@@ -474,6 +479,7 @@ async function startEmbeddedRdp() {
   const formError = $('rdpFormError');
   formError.textContent = '';
   if (!password) { formError.textContent = 'Введите пароль'; return; }
+  if (!state.token) { formError.textContent = 'Сессия истекла — войдите снова'; return; }
   if (!window.IronRDP) {
     formError.textContent = 'Встроенный RDP не собран: отсутствует vendor/ironrdp/bundle.js (npm run build:ironrdp --workspace client).';
     return;
@@ -512,7 +518,7 @@ async function startEmbeddedRdp() {
     builder.username(username);
     builder.password(password);
     builder.destination(destination);
-    builder.proxyAddress(rdpGatewayBase());
+    builder.proxyAddress(rdpGatewayUrl());
     builder.authToken('none');
     builder.desktopSize(new IronRDP.DesktopSize(width, height));
     builder.renderCanvas(canvas);
