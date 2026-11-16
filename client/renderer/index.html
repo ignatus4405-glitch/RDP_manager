@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http: https:" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http: https: ws: wss:" />
 <title>RDP Manager</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
@@ -183,8 +183,44 @@
   </div>
 </div>
 
+<!-- ============ Встроенная RDP-сессия (как в Remote Desktop Manager) ============ -->
+<div id="rdpOverlay" class="rdp-overlay hidden" role="dialog" aria-modal="true" aria-label="RDP-сессия">
+  <div class="rdp-topbar">
+    <div class="rdp-title">
+      <span class="dot rdp"></span>
+      <strong id="rdpConnName">RDP</strong>
+      <span id="rdpConnAddr" class="muted"></span>
+    </div>
+    <span id="rdpStatus" class="rdp-status" data-kind="idle">Не подключено</span>
+    <div class="rdp-actions">
+      <button id="rdpFillBtn" class="btn-ghost" title="Растянуть сессию на всё окно">⤢ Растянуть</button>
+      <button id="rdpExternalBtn" class="btn-ghost" title="Открыть в системном RDP-клиенте (mstsc / remmina)">Во внешнем клиенте</button>
+      <button id="rdpDisconnectBtn" class="btn-danger" disabled>Отключиться</button>
+      <button id="rdpCloseBtn" class="icon-btn" aria-label="Закрыть">✕</button>
+    </div>
+  </div>
+  <div class="rdp-body">
+    <form id="rdpConnectForm" class="rdp-connect-form">
+      <h3>Подключение к «<span id="rdpFormName"></span>»</h3>
+      <p class="muted">Десктоп откроется прямо здесь — как в Remote Desktop Manager. Пароль используется только для этой сессии и нигде не сохраняется.</p>
+      <label for="rdpUsername">Пользователь</label>
+      <input id="rdpUsername" autocomplete="off" spellcheck="false" placeholder="DOMAIN\user или user" />
+      <label for="rdpPassword">Пароль</label>
+      <input id="rdpPassword" type="password" autocomplete="off" placeholder="Пароль RDP" />
+      <p id="rdpFormError" class="login-error"></p>
+      <button type="submit" id="rdpConnectBtn" class="btn-primary big">Подключиться</button>
+      <p class="muted tiny">Трафик идёт через сервер RDP Manager по WebSocket (RDCleanPath) — сервер должен иметь сетевой доступ к RDP-узлу. Встроенный клиент: CredSSP/NLA, клавиатура, мышь, колёсико, буфер обмена.</p>
+    </form>
+    <div id="rdpScreenWrap" class="rdp-screen-wrap hidden">
+      <canvas id="rdpCanvas" tabindex="0" width="1600" height="900"></canvas>
+      <div id="rdpScreenHint" class="rdp-screen-hint">Подключение…</div>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
+<script src="vendor/ironrdp/bundle.js"></script>
 <script src="md.js"></script>
 <script src="app.js"></script>
 </body>

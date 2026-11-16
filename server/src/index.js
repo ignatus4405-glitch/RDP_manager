@@ -7,11 +7,13 @@
  *   RDP_MANAGER_SECRET        — секрет подписи токенов (по умолчанию генерируется в data/secret.key)
  *   RDP_MANAGER_ADMIN_PASSWORD — пароль учётной записи admin при первом запуске (по умолчанию admin123)
  */
+const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const { seededAdmin, DATA_DIR } = require('./db');
 const { WEB_DIR, CLIENT_RENDERER, CLIENT_ASSETS } = require('./paths');
+const { attachRdpGateway } = require('./rdp-gateway');
 const api = require('./api');
 const VERSION = require('../package.json').version;
 
@@ -52,10 +54,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
 });
 
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+// RDP-шлюз (RDCleanPath поверх WebSocket) для встроенных RDP-сессий в клиенте
+attachRdpGateway(server, { path: '/ws/rdp' });
+
+server.listen(PORT, HOST, () => {
   console.log('==============================================');
   console.log(`  RDP Manager Server  v${VERSION}`);
   console.log(`  API:          http://${HOST}:${PORT}/api`);
+  console.log(`  RDP-шлюз:     ws://${HOST}:${PORT}/ws/rdp  (встроенный RDP в клиенте)`);
   console.log(`  Веб-панель:   http://${HOST}:${PORT}/`);
   if (webMode) console.log(`  Веб-режим:    http://${HOST}:${PORT}/app/  (клиент в браузере)`);
   console.log(`  База данных:  ${DATA_DIR}`);
