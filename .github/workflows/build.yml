@@ -161,19 +161,34 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           try {
-            choco install nsis -y --no-progress
-            if ($LASTEXITCODE -ne 0) { throw "choco install nsis вернул код $LASTEXITCODE" }
-
-            $candidates = @(
-              "${env:ProgramFilesX86}\NSIS\makensis.exe",
-              "${env:ProgramFiles}\NSIS\makensis.exe",
-              "${env:ChocolateyInstall}\lib\nsis\tools\makensis.exe"
-            ) | Where-Object { Test-Path $_ }
+            # 1) makensis уже в PATH (вдруг образ раннера уже содержит NSIS)
+            $maker = $null
             $cmd = Get-Command makensis -ErrorAction SilentlyContinue
-            if ($cmd) { $candidates += $cmd.Source }
-            if (-not $candidates) { throw 'makensis не найден ни в одном ожидаемом месте после choco install nsis' }
-            $maker = $candidates[0]
-            Write-Host "makensis: $maker"
+            if ($cmd) { $maker = $cmd.Source; Write-Host "makensis из PATH: $maker" }
+
+            # 2) choco install nsis + рекурсивный поиск бинарника
+            if (-not $maker) {
+              choco install nsis -y --no-progress
+              foreach ($root in @("$env:ChocolateyInstall\lib\nsis", "${env:ProgramFilesX86}\NSIS", "$env:ProgramFiles\NSIS")) {
+                if (Test-Path $root) {
+                  $f = Get-ChildItem $root -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($f) { $maker = $f.FullName; break }
+                }
+              }
+              if ($maker) { Write-Host "makensis из choco: $maker" }
+            }
+
+            # 3) Фолбэк: прямое скачивание NSIS 3.0.4.1 с GitHub (тот же бандл, что у electron-builder)
+            if (-not $maker) {
+              Write-Host 'choco не дал makensis — качаю NSIS 3.0.4.1 напрямую'
+              Invoke-WebRequest -Uri 'https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z' -OutFile 'nsis.7z'
+              New-Item -ItemType Directory -Force 'nsis-dist' | Out-Null
+              tar -xf nsis.7z -C nsis-dist
+              $f = Get-ChildItem 'nsis-dist' -Recurse -Filter makensis.exe | Select-Object -First 1
+              if ($f) { $maker = $f.FullName; Write-Host "makensis из прямого скачивания: $maker" }
+            }
+
+            if (-not $maker) { throw 'makensis не найден ни одним из способов' }
 
             $VER = node -p "require('./package.json').version"
             $STAGE = "server/dist/stage"
