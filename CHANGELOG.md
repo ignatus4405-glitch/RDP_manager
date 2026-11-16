@@ -6,6 +6,20 @@
 на основе [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) — вручную редактировать не нужно,
 если запись создаётся релиз-PR (см. CONTRIBUTING.md).
 
+## [1.2.0] - 2026-11-16
+
+### Добавлено
+- **Отдельный установщик серверной части** (клиент и сервер — теперь разные артефакты релиза):
+  - **Windows**: `RDPManager-Server-Setup-<версия>.exe` (NSIS). Ставит однофайловый SEA-бинарь сервера в `C:\Program Files\RDP Manager Server\`, регистрирует автозапуск от SYSTEM (Планировщик заданий), запускает сразу, открывает TCP 8720 в брандмауэре, ярлыки «Панель сервера» и удаление, запись в «Установка и удаление программ». Деинсталляция спрашивает про удаление БД (по умолчанию оставить).
+  - **Linux**: `RDPManager-Server-<версия>-linux-x64.tar.gz` — `rdp-manager-server` (SEA) + systemd-юнит + `install.sh`/`uninstall.sh`. Ставит в `/opt/rdp-manager-server/`, отдельный пользователь `rdp-manager`, `systemctl enable --now`. `--purge` удаляет и БД.
+- **SEA single-executable сборка сервера** (`esbuild` + `postject`, `server/scripts/build-sea.js`): весь сервер (Express, логика, `node:sqlite` — внешние) в одном бинарнике; папка `web/` рядом (веб-панель). База — `data/` рядом с исполняемым файлом (либо `RDP_MANAGER_DATA`). Проверено end-to-end: бинарь ставится, API отвечает, панель раздаётся, сервис стартует под отдельным пользователем.
+- CI Build: задача матрицы `Server · Windows (NSIS)` и `Server · Linux (tar.gz + systemd)`; на тегах `v*` серверные установщики публикуются в тот же GitHub Release. Смоук-тест SEA-бинарника в CI (Linux).
+- `server/installer/` — NSIS-скрипт, systemd-юнит, install/uninstall скрипты, инструкция по сборке вручную.
+
+### Изменено
+- Версии пакетов (root, client, server) → `1.2.0`. Версия сервера в баннере и `/api/health` теперь берётся из `server/package.json` (а не захардкожена).
+- Определение «домашнего» каталога приложения (`server/src/paths.js`): env `RDP_MANAGER_HOME` → `web/` рядом с исполняемым файлом (SEA) → dev из репозитория.
+
 ## [1.1.1] - 2026-11-16
 
 ### Исправлено

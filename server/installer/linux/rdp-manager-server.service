@@ -1,0 +1,22 @@
+[Unit]
+Description=RDP Manager Server — база подключений RDP/AnyDesk/RustDesk и документация
+Documentation=https://github.com/ignatus4405-glitch/RDP_manager
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=rdp-manager
+Group=rdp-manager
+WorkingDirectory=/opt/rdp-manager-server
+ExecStart=/opt/rdp-manager-server/rdp-manager-server
+Restart=on-failure
+RestartSec=5
+# Небольшое ужесточение (данные сервер пишет только в свой каталог)
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/rdp-manager-server/data
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
