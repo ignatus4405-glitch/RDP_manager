@@ -9,6 +9,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
+let autoUpdater = null;
+try { ({ autoUpdater } = require('electron-updater')); } catch { autoUpdater = null; }
+
 let mainWindow = null;
 
 function createWindow() {
@@ -127,9 +131,46 @@ function launchRustDesk(address, name) {
   return { ok: true, message: `Передаю RustDesk (${id}) системному обработчику…` };
 }
 
+/* ---------- Автоматическое обновление из GitHub Releases ---------- */
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // раз в 6 часов
+let updateTimer = null;
+
+function sendToWindow(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function initAutoUpdates() {
+  // В dev-режиме (app не собран в .exe/.AppImage) каждый запуск — запуск свежего кода
+  if (!app.isPackaged || !autoUpdater) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => sendToWindow('update-available', info?.version));
+  autoUpdater.on('update-downloaded', (info) => sendToWindow('update-downloaded', info?.version));
+  autoUpdater.on('error', (err) => sendToWindow('update-error', String(err?.message || err)));
+
+  const check = () => autoUpdater.checkForUpdates().catch((err) => console.warn('Проверка обновлений не удалась:', err?.message || err));
+  check();
+  updateTimer = setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+}
+
 /* ---------- IPC ---------- */
 ipcMain.handle('launch-connection', (event, conn) => launchConnection(conn));
 ipcMain.handle('app-version', () => app.getVersion());
+ipcMain.handle('update-check', async () => {
+  if (!app.isPackaged || !autoUpdater) return { packaged: false };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { packaged: true, version: result?.updateInfo?.version || null };
+  } catch (err) {
+    return { packaged: true, error: String(err?.message || err) };
+  }
+});
+ipcMain.handle('update-install', () => {
+  if (app.isPackaged && autoUpdater) autoUpdater.quitAndInstall();
+});
 ipcMain.handle('open-external', (event, url) => {
   if (/^https?:\/\//i.test(String(url || ''))) return shell.openExternal(url);
   return Promise.resolve();
@@ -140,7 +181,11 @@ ipcMain.handle('show-error', (event, message) => {
 
 app.whenReady().then(() => {
   createWindow();
+  initAutoUpdates();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => {
+  if (updateTimer) clearInterval(updateTimer);
+  if (process.platform !== 'darwin') app.quit();
+});

@@ -1,0 +1,43 @@
+name: CI
+
+# Быстрые проверки после КАЖДОГО изменения (любой пуш в любую ветку + PR)
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Проверка кода и смоук-тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Синтаксическая проверка всех JS
+        run: npm run check
+
+      - name: Смоук-тесты сервера (node:test)
+        run: npm test
+
+      - name: Проверка, что electron-builder доступен
+        run: npx electron-builder --version
+
+  audit:
+    name: Аудит зависимостей (high+)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: npm audit
+        run: npm audit --audit-level=high || true   # предупреждение, а не блокировка (см. AGENTS.md)

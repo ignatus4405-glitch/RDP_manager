@@ -1,5 +1,10 @@
 # RDP Manager
 
+[![CI](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/ci.yml/badge.svg)](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/ci.yml)
+[![Build](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/build.yml/badge.svg)](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/build.yml)
+[![Release](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/release.yml/badge.svg)](https://github.com/ignatus4405-glitch/RDP_manager/actions/workflows/release.yml)
+[Changelog](CHANGELOG.md)
+
 Централизованное хранилище и лаунчер подключений **RDP / AnyDesk / RustDesk** с встроенной документацией.
 Состоит из двух частей:
 
@@ -27,6 +32,24 @@ RDP_manager/
 │   └── assets/icon.png     # Иконка приложения
 └── package.json            # npm workspaces: server + client
 ```
+
+## Автосборка и автообновление (GitHub Actions)
+
+Три workflow (`.github/workflows/`):
+
+| Workflow | Когда запускается | Что делает |
+|----------|-------------------|------------|
+| **CI** (`ci.yml`) | каждый push (любая ветка) и PR | `node --check` всех JS, смоук-тесты сервера, проверка electron-builder |
+| **Build** (`build.yml`) | push в `main`, тег `v*`, PR в `main`, вручную | сборка установщиков **Windows NSIS** и **Linux AppImage**; на теге `v*` — публикация в GitHub Release вместе с `latest.yml` |
+| **Release Please** (`release.yml`) | push в `main` | автоматический Release PR с bump версии и CHANGELOG по Conventional Commits; мерж создаёт тег и релиз |
+
+**Как выйти новая версия (полностью автоматически):**
+1. `feat:`/`fix:`-коммиты → в `main`;
+2. release-please сам поднимет версию (например, 1.1.0 → 1.2.0) и changelog;
+3. мерж Release PR → тег `v1.2.0` → Build собирает и публикует установщики;
+4. установленные клиенты при старте (и раз в 6 ч) видят баннер «Доступна новая версия…»; обновление тихо скачивается и ставится по кнопке «Установить и перезапустить» или при выходе. В Профиле всегда есть «Проверить обновления» и номер версии.
+
+Текущие версии пакетов: `1.1.0`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
 
 ## Требования
 
@@ -166,9 +189,16 @@ xcopy C:\RDP_manager\server\data D:\backup\rdp-manager /E /Y
 - **Забыть пароль admin полностью:** остановить сервер, удалить `server/data/rdp-manager.db` — при следующем запуске создастся новая БД (все данные будут потеряны!) с admin/admin123. Поэтому регулярно делайте бэкап.
 - **Обновление приложения:** `git pull && npm install && npm run server`.
 
+## Документация в репозитории
+
+- `CHANGELOG.md` — история изменений (поддерживается release-please)
+- `CONTRIBUTING.md` — как контрибьютить и как выходит релиз (Conventional Commits, автообновление)
+- `AGENTS.md` — карта проекта и правила для любого агента, продолжающего работу
+
 ## Статус реализации / ограничения
 
-- Проверено end-to-end: API (авторизация, CRUD подключений/документов/пользователей, поиск, фильтры), запуск сервера, веб-панель и веб-режим клиента — `http://<IP>:8720/app/`.
+- Проверено end-to-end: API (авторизация, CRUD подключений/документов/пользователей, поиск, фильтры), запуск сервера, веб-панель и веб-режим клиента — `http://<IP>:8720/app/`. Смоук-тесты сервера зелёные (`npm test`).
 - Графический интерфейс клиента реализован на Electron; бинарник Electron намеренно не входит в репозиторий (ставится через `npm install`).
+- Автообновление клиента требует опубликованного GitHub Release с установщиками и `latest.yml`; появляется после мержа Release PR (см. выше). В приватном репозитории автообновление не скачает релиз анонимно — см. `CONTRIBUTING.md`.
 - RustDesk и AnyDesk запускаются как внешние программы — они должны быть установлены на клиентском ПК.
 - Пароли RDP/AnyDesk/RustDesk не хранятся и не передаются через сервер.

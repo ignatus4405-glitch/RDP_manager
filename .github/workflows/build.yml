@@ -1,0 +1,68 @@
+name: Build
+
+# Автосборка установщиков:
+#  - push в main       → сборка + артефакты (проверка, что main собирается)
+#  - push тега v*      → сборка + ПУБЛИКАЦИЯ в GitHub Release (это и есть автообновление клиентов)
+#  - PR в main         → сборка + артефакты (проверка перед мержем)
+#  - вручную           → workflow_dispatch
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужно electron-builder для создания/наполнения Release на тегах
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows (NSIS)
+          - os: ubuntu-latest
+            label: Linux (AppImage)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Проверка и тесты
+        run: npm run check && npm test
+
+      - name: Сборка (и публикация в Release при пуше тега v*)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "Тег ${GITHUB_REF_NAME} — собираю и публикую в GitHub Release"
+            npm run dist:publish --workspace client
+          else
+            echo "Ветка ${GITHUB_REF_NAME} — собираю без публикации"
+            npm run dist --workspace client
+          fi
+
+      - name: Артефакты сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            client/dist/*.exe
+            client/dist/*.AppImage
+            client/dist/latest*.yml
+            client/dist/*.blockmap
+          retention-days: 14
+          if-no-files-found: warn

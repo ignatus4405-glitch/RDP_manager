@@ -79,6 +79,10 @@
     <div id="mustChangeBanner" class="banner hidden">
       ⚠ Вы вошли с паролем по умолчанию / после сброса. Пожалуйста, смените пароль в разделе «Профиль».
     </div>
+    <div id="updateBanner" class="update-banner hidden">
+      <span id="updateBannerText">Доступна новая версия</span>
+      <button id="updateBannerBtn" class="btn-primary">Подробнее</button>
+    </div>
 
     <!-- ===== Подключения ===== -->
     <section id="connectionsView" class="view">
@@ -150,6 +154,11 @@
         <div class="profile-row"><span>ФИО</span><strong id="profFullName">—</strong></div>
         <div class="profile-row"><span>Роль</span><strong id="profRole">—</strong></div>
         <div class="profile-row"><span>Сервер</span><strong id="profServer">—</strong></div>
+        <div class="profile-row"><span>Версия приложения</span><strong id="profVersion">—</strong></div>
+        <div class="update-row">
+          <button id="btnCheckUpdates" class="btn-ghost">Проверить обновления</button>
+          <span id="updateStatus" class="muted"></span>
+        </div>
         <hr />
         <h3>Смена пароля</h3>
         <label for="curPassword">Текущий пароль</label>

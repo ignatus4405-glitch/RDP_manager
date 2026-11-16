@@ -1,0 +1,25 @@
+name: Release Please
+
+# Автоматическое версионирование:
+#  на каждый push в main release-please поддерживает Release PR с bump версии и CHANGELOG
+#  (по Conventional Commits: feat → minor, fix → patch, BREAKING CHANGE → major).
+#  Мерж Release PR создаёт тег vX.Y.Z и GitHub Release → тег запускает Build →
+#  установщики и latest.yml попадают в Release → клиенты получают уведомление об обновлении.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write        # создание тега и релиза
+  pull-requests: write   # создание/обновление Release PR
+
+jobs:
+  release-please:
+    name: Release PR / tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

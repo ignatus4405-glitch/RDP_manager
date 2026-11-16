@@ -545,6 +545,104 @@ $('btnChangePassword').addEventListener('click', async () => {
   } catch (err) { toast(err.message, true); }
 });
 
+/* ================= Обновления из GitHub Releases ================= */
+const GH_REPO = 'ignatus4405-glitch/RDP_manager';
+let currentVersion = null;
+let updateReleaseUrl = `https://github.com/${GH_REPO}/releases/latest`;
+
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+async function getCurrentVersion() {
+  if (currentVersion) return currentVersion;
+  try { currentVersion = window.rdpManager?.version ? await window.rdpManager.version() : 'dev'; } catch { currentVersion = 'dev'; }
+  $('profVersion').textContent = 'v' + currentVersion;
+  return currentVersion;
+}
+
+function openReleasePage() {
+  if (window.rdpManager?.openExternal) window.rdpManager.openExternal(updateReleaseUrl);
+  else window.open(updateReleaseUrl, '_blank', 'noopener');
+}
+
+function showUpdateBanner(mode, version) {
+  const banner = $('updateBanner');
+  const text = $('updateBannerText');
+  const btn = $('updateBannerBtn');
+  banner.className = 'update-banner' + (mode === 'ready' ? ' ready' : mode === 'downloading' ? ' downloading' : '');
+  if (mode === 'ready') {
+    text.textContent = `Новая версия ${version} загружена и будет установлена при выходе`;
+    btn.textContent = 'Установить и перезапустить';
+    btn.onclick = () => window.rdpManager?.updates?.install();
+  } else if (mode === 'downloading') {
+    text.textContent = `Доступна новая версия ${version}. Идёт загрузка обновления…`;
+    btn.textContent = 'Перейти к релизу';
+    btn.onclick = openReleasePage;
+  } else {
+    text.textContent = `Доступна новая версия ${version}. Рекомендуем обновиться.`;
+    btn.textContent = 'Скачать';
+    btn.onclick = openReleasePage;
+  }
+  banner.classList.remove('hidden');
+}
+
+/** Проверка по GitHub Releases API — работает и в dev, и в браузерном режиме */
+async function checkForUpdatesViaGitHub() {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return null;
+    const rel = await res.json();
+    const latest = String(rel.tag_name || '').replace(/^v/, '');
+    updateReleaseUrl = rel.html_url || updateReleaseUrl;
+    const current = await getCurrentVersion();
+    if (latest && compareVersions(latest, current) > 0) showUpdateBanner('available', latest);
+    return { latest, current };
+  } catch {
+    return null; // нет сети или API недоступен — молча пропускаем
+  }
+}
+
+/** События от встроенного автообновления (только в собранном приложении) */
+if (window.rdpManager?.updates) {
+  window.rdpManager.updates.onAvailable((v) => { if (v) showUpdateBanner('downloading', v); });
+  window.rdpManager.updates.onDownloaded((v) => { if (v) showUpdateBanner('ready', v); toast(`Версия ${v} загружена и готова к установке`); });
+}
+
+$('btnCheckUpdates').addEventListener('click', async () => {
+  const status = $('updateStatus');
+  status.textContent = 'Проверяю…';
+  const current = await getCurrentVersion();
+  try {
+    // В собранном приложении спрашиваем electron-updater, иначе — GitHub API
+    const r = await window.rdpManager?.updates?.check?.();
+    if (r && r.packaged) {
+      if (r.error) throw new Error(r.error);
+      if (r.version && compareVersions(r.version, current) > 0) status.textContent = `Доступна версия ${r.version} — идёт загрузка…`;
+      else status.textContent = `У вас последняя версия (v${current})`;
+      checkForUpdatesViaGitHub();
+      return;
+    }
+    const gh = await checkForUpdatesViaGitHub();
+    status.textContent = gh && gh.latest && compareVersions(gh.latest, current) > 0
+      ? `Доступна версия ${gh.latest}`
+      : `У вас последняя версия (v${current})`;
+  } catch (err) {
+    status.textContent = 'Не удалось проверить: ' + err.message;
+  }
+});
+
+// Фоновая проверка при старте
+getCurrentVersion().then(checkForUpdatesViaGitHub);
+
 /* ================= Автовход по сохранённой сессии ================= */
 (async function restoreSession() {
   if (!state.token) return;
