@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RDP Manager Server — Панель администратора</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b26; --panel2: #1c2333; --border: #2a3348;
+    --text: #e6e9f0; --muted: #8b94ab; --accent: #3b82f6; --accent2: #2563eb;
+    --green: #22c55e; --red: #ef4444; --yellow: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 22px 60px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+  .logo { width: 46px; height: 46px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), #7c3aed); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  h1 { font-size: 20px; font-weight: 650; letter-spacing: .2px; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; color: var(--text); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .stat .n { font-size: 26px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 5px; }
+  input, select, textarea { width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 9px; padding: 10px 12px; font-size: 14px; outline: none; font-family: inherit; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: end; }
+  button { cursor: pointer; border: none; border-radius: 9px; padding: 10px 16px; font-size: 13.5px; font-weight: 600; color: #fff; background: var(--accent2); transition: background .15s, transform .05s; }
+  button:hover { background: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button.ghost:hover { border-color: var(--accent); }
+  button.danger { background: transparent; border: 1px solid var(--red); color: #fca5a5; }
+  button.danger:hover { background: var(--red); color: #fff; }
+  button.small { padding: 6px 10px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.admin { background: #3b82f633; color: #93c5fd; border: 1px solid #3b82f655; }
+  .badge.employee { background: #22c55e22; color: #86efac; border: 1px solid #22c55e44; }
+  .badge.off { background: #ef444422; color: #fca5a5; border: 1px solid #ef444455; }
+  #loginView { max-width: 420px; margin: 8vh auto 0; }
+  #appView { display: none; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent); padding: 10px 20px; border-radius: 10px; font-size: 13.5px; display: none; z-index: 50; max-width: 90vw; }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  code { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- Экран входа -->
+<div id="loginView" class="card">
+  <div style="text-align:center;margin-bottom:16px">
+    <div class="logo" style="margin:0 auto 12px">🖥️</div>
+    <h1>RDP Manager Server</h1>
+    <p class="muted" style="margin-top:6px">Панель администрирования сервера</p>
+  </div>
+  <label for="lUser">Логин</label>
+  <input id="lUser" autocomplete="username" value="admin" />
+  <label for="lPass">Пароль</label>
+  <input id="lPass" type="password" autocomplete="current-password" placeholder="Пароль" />
+  <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+    <button id="btnLogin" style="flex:1">Войти</button>
+  </div>
+  <p class="muted" style="margin-top:12px">По умолчанию: <code>admin</code> / <code>admin123</code> — смените пароль после первого входа.</p>
+</div>
+
+<!-- Приложение -->
+<div id="appView" class="wrap">
+  <div class="topbar">
+    <header style="margin:0">
+      <div class="logo">🖥️</div>
+      <div>
+        <h1>RDP Manager Server</h1>
+        <p id="whoAmI">Панель администрирования</p>
+      </div>
+    </header>
+    <button class="ghost" id="btnLogout">Выйти</button>
+  </div>
+
+  <div class="card">
+    <h2>Состояние сервера</h2>
+    <div class="stats">
+      <div class="stat"><div class="n" id="stConnections">—</div><div class="l">Подключений</div></div>
+      <div class="stat"><div class="n" id="stDocuments">—</div><div class="l">Документов</div></div>
+      <div class="stat"><div class="n" id="stUsers">—</div><div class="l">Учётных записей</div></div>
+      <div class="stat"><div class="n" id="stAdmins">—</div><div class="l">Администраторов</div></div>
+    </div>
+    <p class="muted" style="margin-top:12px">Подключения и документация наполняются через десктоп-клиент RDP Manager (разделы «Подключения» и «Документация»). Здесь — управление учётными записями.</p>
+  </div>
+
+  <div class="card">
+    <h2>Создать учётную запись</h2>
+    <div class="row">
+      <div><label>Логин *</label><input id="uLogin" placeholder="ivanov" /></div>
+      <div><label>ФИО</label><input id="uName" placeholder="Иванов Иван Иванович" /></div>
+      <div><label>Роль</label><select id="uRole"><option value="employee">Сотрудник</option><option value="admin">Администратор</option></select></div>
+      <div><label>Пароль *</label><input id="uPass" type="password" placeholder="мин. 6 символов" /></div>
+    </div>
+    <div style="margin-top:12px"><button id="btnCreateUser">Создать</button></div>
+    <p class="muted" style="margin-top:8px">Новый пользователь при первом входе обязан сменить пароль.</p>
+  </div>
+
+  <div class="card">
+    <h2>Учётные записи</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Логин</th><th>ФИО</th><th>Роль</th><th>Статус</th><th style="width:260px">Действия</th></tr></thead>
+        <tbody id="usersTable"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+let token = sessionStorage.getItem('rdp_admin_token') || null;
+let me = null;
+
+const $ = (id) => document.getElementById(id);
+const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3500); };
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (res.status === 401) { logout(); throw new Error(data.error || 'Требуется вход'); }
+  if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+  return data;
+}
+
+async function login() {
+  try {
+    const data = await api('/login', { method: 'POST', body: { username: $('lUser').value.trim(), password: $('lPass').value } });
+    if (data.user.role !== 'admin') { toast('Панель доступна только администраторам'); return; }
+    token = data.token; me = data.user;
+    sessionStorage.setItem('rdp_admin_token', token);
+    showApp();
+  } catch (e) { toast(e.message); }
+}
+
+function logout() {
+  token = null; sessionStorage.removeItem('rdp_admin_token');
+  $('appView').style.display = 'none'; $('loginView').style.display = 'block';
+}
+
+async function showApp() {
+  $('loginView').style.display = 'none'; $('appView').style.display = 'block';
+  try { const { user } = await api('/me'); me = user; $('whoAmI').textContent = `Вы вошли: ${user.full_name || user.username} (${user.role === 'admin' ? 'администратор' : 'сотрудник'})`; } catch {}
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const stats = await api('/stats');
+    $('stConnections').textContent = stats.connections;
+    $('stDocuments').textContent = stats.documents;
+    $('stUsers').textContent = stats.users;
+    $('stAdmins').textContent = stats.admins;
+    const { users } = await api('/users');
+    $('usersTable').innerHTML = users.map(u => `
+      <tr>
+        <td><strong>${esc(u.username)}</strong></td>
+        <td>${esc(u.full_name || '—')}</td>
+        <td><span class="badge ${u.role}">${u.role === 'admin' ? 'Администратор' : 'Сотрудник'}</span></td>
+        <td>${u.disabled ? '<span class="badge off">Отключена</span>' : (u.must_change_password ? '<span class="muted">Пароль не сменён</span>' : '<span style="color:var(--green)">Активна</span>')}</td>
+        <td>
+          <button class="ghost small" onclick="toggleDisable(${u.id}, ${u.disabled ? 0 : 1})">${u.disabled ? 'Включить' : 'Отключить'}</button>
+          <button class="ghost small" onclick="resetPass(${u.id}, '${esc(u.username)}')">Сброс пароля</button>
+          <button class="danger small" onclick="removeUser(${u.id}, '${esc(u.username)}')">Удалить</button>
+        </td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message); }
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+async function toggleDisable(id, disabled) {
+  try { await api('/users/' + id, { method: 'PUT', body: { disabled: !!disabled } }); toast('Готово'); refresh(); }
+  catch (e) { toast(e.message); }
+}
+
+async function resetPass(id, username) {
+  const p = prompt(`Новый пароль для «${username}» (мин. 6 символов):`);
+  if (!p) return;
+  try { await api(`/users/${id}/reset-password`, { method: 'POST', body: { password: p } }); toast('Пароль сброшен. Пользователь сменит его при входе.'); refresh(); }
+  catch (e) { toast(e.message); }
+}
+
+async function removeUser(id, username) {
+  if (!confirm(`Удалить учётную запись «${username}»? Действие необратимо.`)) return;
+  try { await api('/users/' + id, { method: 'DELETE' }); toast('Учётная запись удалена'); refresh(); }
+  catch (e) { toast(e.message); }
+}
+
+$('btnLogin').addEventListener('click', login);
+$('lPass').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+$('btnLogout').addEventListener('click', logout);
+$('btnCreateUser').addEventListener('click', async () => {
+  try {
+    await api('/users', { method: 'POST', body: { username: $('uLogin').value.trim(), full_name: $('uName').value.trim(), role: $('uRole').value, password: $('uPass').value } });
+    $('uLogin').value = ''; $('uName').value = ''; $('uPass').value = '';
+    toast('Учётная запись создана'); refresh();
+  } catch (e) { toast(e.message); }
+});
+
+if (token) showApp();
+</script>
+</body>
+</html>
