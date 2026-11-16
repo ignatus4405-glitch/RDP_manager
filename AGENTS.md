@@ -18,8 +18,11 @@ RDP Manager — система единого доступа к инфрастр
 | `npm run check` | `node --check` для всех JS |
 | `npm test` | смоук-тест сервера (`server/test/smoke.test.js`, node:test) |
 | `npm run dist` | сборка установщиков в `client/dist/` |
-| `npm run dist` | сборка установщиков в `client/dist/` |
+| `npm run dist` | сборка установщиков клиента в `client/dist/` |
+| `npm run build:sea --workspace server` | сборка однофайлового сервера (esbuild → SEA) в `server/dist/rdp-manager-server[.exe]` |
 | `node client/scripts/make-latest-yml.js` | генерация `latest(-linux).yml` для автообновления (CI делает сам на тегах) |
+| `server/installer/linux/install.sh` | установка сервера в `/opt/rdp-manager-server` + systemd (внутри tar.gz) |
+| `server/installer/windows/installer.nsi` | NSIS-установщик сервера для Windows (makensis в CI через choco) |
 
 ## Карта файлов
 ```
@@ -29,6 +32,9 @@ server/src/db.js      — схема SQLite, seed admin, scrypt hash/verify, с�
 server/src/auth.js    — HMAC-JWT (sign/verify), requireAuth, requireAdmin (12 ч TTL, env RDP_MANAGER_TOKEN_TTL)
 server/web/index.html — веб-панель администратора (vanilla JS, те же /api/*)
 server/test/          — смоук-тесты
+server/src/paths.js   — «домашний» каталог приложения (env → web/ рядом с exe (SEA) → dev из репозитория)
+server/scripts/build-sea.js — esbuild-бандл + инъекция в node-бинарник (SEA)
+server/installer/     — installer.nsi (Windows), install.sh/uninstall.sh + systemd-юнит (Linux), README
 client/main.js        — окно Electron; запуск mstsc/xfreerdp/anydesk/rustdesk (spawn, без shell); electron-updater (только packaged)
 client/preload.js     — contextBridge: rdpManager.{launch,version,openExternal,platform,updates.*}
 client/renderer/*.js  — UI (vanilla, без фреймворка); md.js — безопасный Markdown→HTML
@@ -41,9 +47,18 @@ release-please-config.json / .release-please-manifest.json — авто-верс
 1. Коммит по Conventional Commits (`feat:`, `fix:`, …) → push/PR в `main`.
 2. CI проверяет код; Build собирает установщики (артефакты).
 3. release-please обновляет Release PR (версия + CHANGELOG).
-4. Мерж Release PR → тег `vX.Y.Z` → Build публикует NSIS/AppImage + `latest.yml` в Release.
+4. Мерж Release PR → тег `vX.Y.Z` → Build собирает и публикует в Release: клиент (NSIS/AppImage + `latest*.yml`) И сервер (`RDPManager-Server-Setup-*.exe` NSIS / `RDPManager-Server-*-linux-x64.tar.gz`).
 5. Клиенты получают уведомление (электрон-апдейтер при старте и раз в 6 ч; баннер в приложении; кнопка «Проверить обновления» в Профиле).
 Подробности и приватный репозиторий: CONTRIBUTING.md.
+
+## SEA (однофайловый сервер) — как устроено
+- `esbuild` собирает весь сервер в один `dist/server.cjs`; встроенные модули (`node:sqlite`, `crypto`) внешние.
+- `node --experimental-sea-config` → blob; чистый node-бинарник копируется в `dist/rdp-manager-server[.exe]`; `postject` внедряет blob (sentinel `NODE_SEA_FUSE_...`).
+- Пути к `web/` и `data/` определяются в `src/paths.js` ЧЕРЕЗ `process.execPath` (а не `__dirname`!) — поэтому в бандле `__dirname` себя не спасёт: порядок — env `RDP_MANAGER_HOME` → `web/` рядом с исполняемым файлом → dev из репозитория.
+- `web/` — обязательно рядом с бинарником (веб-панель); без неё статика просто не раздастся (не падает).
+- SEA-бинарник ≈ 120 МБ (внутри рантайм Node); в релизе — как есть, сжимается самим GitHub.
+- Локально SEA собирается и проверяется только на той же ОС; в CI — матрица `Server · Windows|Linux` в `build.yml`, на тегах обе сборки публикуются в релиз.
+- Версия в баннере/`/api/health` берётся из `server/package.json` (инлайнится esbuild'ом).
 
 ## Подводные камни
 1. **`node:sqlite` experimental** в Node 22 → везде используются `--disable-warning=ExperimentalWarning` (скрипты `server`); API стабилен в рамках нашей схемы. Если переходите на <22.5 — нужен `better-sqlite3` (нативная сборка).

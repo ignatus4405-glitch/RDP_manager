@@ -24,6 +24,8 @@ RDP_manager/
 │   │   ├── db.js           # SQLite (node:sqlite), схема БД, scrypt-хеши, первичный admin
 │   │   └── auth.js         # HMAC-JWT токены, middleware авторизации и ролей
 │   ├── web/index.html      # Встроенная веб-панель администратора (создание админов и пр.)
+│   ├── scripts/build-sea.js  # Однофайловый SEA-бинарник сервера (esbuild + postject)
+│   ├── installer/          # Установщики сервера: windows/installer.nsi, linux/install.sh + systemd-юнит
 │   └── data/               # Создаётся при первом запуске: rdp-manager.db, secret.key (в .gitignore)
 ├── client/                 # Десктоп-клиент (Electron)
 │   ├── main.js             # Главный процесс: окно + запуск mstsc / AnyDesk / RustDesk
@@ -40,7 +42,7 @@ RDP_manager/
 | Workflow | Когда запускается | Что делает |
 |----------|-------------------|------------|
 | **CI** (`ci.yml`) | каждый push (любая ветка) и PR | `node --check` всех JS, смоук-тесты сервера, проверка electron-builder |
-| **Build** (`build.yml`) | любой push (ветки и теги), PR в `main`, вручную | сборка установщиков **Windows NSIS** и **Linux AppImage**; генерация `latest(-linux).yml`; на теге `v*` — публикация в GitHub Release (softprops/action-gh-release) |
+| **Build** (`build.yml`) | любой push (ветки и теги), PR в `main`, вручную | сборка установщиков: клиент (**Windows NSIS** / **Linux AppImage**) и сервер (**Windows NSIS** / **Linux tar.gz**); генерация `latest(-linux).yml`; на теге `v*` — публикация в GitHub Release (softprops/action-gh-release) |
 | **Release Please** (`release.yml`) | push в `main` | автоматический Release PR с bump версии и CHANGELOG по Conventional Commits; мерж создаёт тег и релиз |
 
 **Как выйти новая версия (полностью автоматически):**
@@ -49,7 +51,7 @@ RDP_manager/
 3. мерж Release PR → тег `v1.2.0` → Build собирает и публикует установщики;
 4. установленные клиенты при старте (и раз в 6 ч) видят баннер «Доступна новая версия…»; обновление тихо скачивается и ставится по кнопке «Установить и перезапустить» или при выходе. В Профиле всегда есть «Проверить обновления» и номер версии.
 
-Текущие версии пакетов: `1.1.1`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
+Текущие версии пакетов: `1.2.0`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
 
 ## Требования
 
@@ -60,7 +62,30 @@ RDP_manager/
   - если программа не найдена в `PATH`, клиент вызовет системный protocol-обработчик (`anydesk:`, `rustdesk://`).
 - Сеть: клиентские ПК должны видеть порт сервера (по умолчанию **8720**, TCP).
 
-## Быстрый старт: сервер
+## Установка из готовых установщиков (рекомендуется)
+
+В каждом GitHub Release лежат **два отдельных продукта** (и клиент, и сервер):
+
+| Файл | Что | Куда ставится |
+|------|-----|----------------|
+| `RDPManager-Setup-<версия>.exe` | десктоп-клиент (Windows, NSIS) | `C:\Program Files\RDP Manager` |
+| `RDPManager-<версия>.AppImage` | десктоп-клиент (Linux) | портативно |
+| `RDPManager-Server-Setup-<версия>.exe` | **сервер** (Windows, NSIS) | `C:\Program Files\RDP Manager Server` |
+| `RDPManager-Server-<версия>-linux-x64.tar.gz` | **сервер** (Linux) | `/opt/rdp-manager-server` |
+
+**Сервер на Windows**: запустите `RDPManager-Server-Setup-<версия>.exe` от имени администратора — сервер поставится, зарегистрируется в автозапуске от SYSTEM, запустится сразу, порт 8720 будет открыт в брандмауэре. Панель: `http://<IP-сервера>:8720/`.
+
+**Сервер на Linux**:
+```bash
+tar -xzf RDPManager-Server-<версия>-linux-x64.tar.gz
+cd rdp-manager-server
+sudo bash install.sh
+```
+Ставит в `/opt/rdp-manager-server`, запускает systemd-юнит `rdp-manager-server` (пользователь `rdp-manager`). Логи: `journalctl -u rdp-manager-server -f`. Удаление: `sudo bash uninstall.sh` (БД сохраняется), полный снос: `sudo bash uninstall.sh --purge`.
+
+**Дальше на каждом клиентском ПК**: поставьте `RDPManager-Setup-<версия>.exe` / AppImage, в окне входа укажите `http://<IP-сервера>:8720`, логин и пароль.
+
+## Быстрый старт: сервер (из исходников)
 
 ```bash
 npm install          # установить зависимости (server + client)

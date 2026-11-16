@@ -7,10 +7,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { APP_HOME } = require('./paths');
 
 const DATA_DIR = process.env.RDP_MANAGER_DATA
   ? path.resolve(process.env.RDP_MANAGER_DATA)
-  : path.join(__dirname, '..', 'data');
+  : path.join(APP_HOME, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'rdp-manager.db'));

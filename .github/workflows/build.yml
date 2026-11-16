@@ -105,3 +105,147 @@ jobs:
             client/dist/*.AppImage
             client/dist/*.AppImage.blockmap
             client/dist/latest*.yml
+
+  # =========================================================
+  #  Серверный установщик (SEA single-binary):
+  #   Windows → NSIS .exe (задача Планировщика от SYSTEM, правило брандмауэра, ярлыки)
+  #   Linux   → tar.gz + systemd-юнит
+  # =========================================================
+  build-server:
+    name: Server · ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows (NSIS)
+          - os: ubuntu-latest
+            label: Linux (tar.gz + systemd)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установка зависимостей (без бинарника Electron — серверу не нужен)
+        shell: bash
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: npm ci
+
+      - name: Сборка однофайлового сервера (esbuild → SEA)
+        shell: bash
+        run: npm run build:sea --workspace server
+
+      - name: Смоук-тест SEA-бинарника (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p /tmp/sea-test
+          cp server/dist/rdp-manager-server /tmp/sea-test/
+          cp -r server/web /tmp/sea-test/
+          chmod +x /tmp/sea-test/rdp-manager-server
+          (cd /tmp/sea-test && RDP_MANAGER_PORT=8799 ./rdp-manager-server > /tmp/sea-test.log 2>&1 & echo $! > /tmp/sea-test.pid)
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:8799/api/health && break || sleep 0.5; done
+          echo
+          curl -sf -X POST http://127.0.0.1:8799/api/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}' | grep -q token
+          curl -sf -o /dev/null -w 'web panel → HTTP %{http_code}\n' http://127.0.0.1:8799/
+          kill "$(cat /tmp/sea-test.pid)"
+
+      - name: Упаковка Windows-установщика (NSIS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            # 1) makensis уже в PATH (вдруг образ раннера уже содержит NSIS)
+            $maker = $null
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) { $maker = $cmd.Source; Write-Host "makensis из PATH: $maker" }
+
+            # 2) choco install nsis + рекурсивный поиск бинарника
+            if (-not $maker) {
+              choco install nsis -y --no-progress
+              foreach ($root in @("$env:ChocolateyInstall\lib\nsis", "${env:ProgramFilesX86}\NSIS", "$env:ProgramFiles\NSIS")) {
+                if (Test-Path $root) {
+                  $f = Get-ChildItem $root -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($f) { $maker = $f.FullName; break }
+                }
+              }
+              if ($maker) { Write-Host "makensis из choco: $maker" }
+            }
+
+            # 3) Фолбэк: прямое скачивание NSIS 3.0.4.1 с GitHub (тот же бандл, что у electron-builder)
+            if (-not $maker) {
+              Write-Host 'choco не дал makensis — качаю NSIS 3.0.4.1 напрямую'
+              Invoke-WebRequest -Uri 'https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z' -OutFile 'nsis.7z'
+              New-Item -ItemType Directory -Force 'nsis-dist' | Out-Null
+              tar -xf nsis.7z -C nsis-dist
+              $f = Get-ChildItem 'nsis-dist' -Recurse -Filter makensis.exe | Select-Object -First 1
+              if ($f) { $maker = $f.FullName; Write-Host "makensis из прямого скачивания: $maker" }
+            }
+
+            if (-not $maker) { throw 'makensis не найден ни одним из способов' }
+
+            $VER = node -p "require('./package.json').version"
+            $STAGE = "server/dist/stage"
+            New-Item -ItemType Directory -Force $STAGE | Out-Null
+            Copy-Item "server/dist/rdp-manager-server.exe" $STAGE
+            Copy-Item -Recurse "server/web" "$STAGE/web"
+            Copy-Item "server/installer/windows/installer.nsi" $STAGE
+
+            Push-Location $STAGE
+            & $maker "/DVERSION=$VER" "installer.nsi" *> "makensis.log"
+            $code = $LASTEXITCODE
+            Pop-Location
+            Get-Content "$STAGE/makensis.log" | Select-Object -Last 15
+            if ($code -ne 0) {
+              Get-Content "$STAGE/makensis.log" | Select-Object -Last 8 | ForEach-Object { Write-Host "::error::$_" }
+              exit $code
+            }
+            Move-Item "$STAGE/RDPManager-Server-Setup-$VER.exe" "server/dist/"
+            Remove-Item "server/dist/rdp-manager-server.exe" -Force
+            Get-ChildItem "server/dist"
+          } catch {
+            Write-Host "::error::NSIS packaging failed: $($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: Упаковка Linux-установщика (tar.gz)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          PKG=server/dist/pkg/rdp-manager-server
+          mkdir -p "$PKG"
+          cp server/dist/rdp-manager-server "$PKG/"
+          cp -r server/web "$PKG/web"
+          cp server/installer/linux/install.sh server/installer/linux/uninstall.sh server/installer/linux/rdp-manager-server.service "$PKG/"
+          chmod 755 "$PKG/rdp-manager-server" "$PKG/install.sh" "$PKG/uninstall.sh"
+          tar -C server/dist/pkg -czf "server/dist/RDPManager-Server-${VER}-linux-x64.tar.gz" rdp-manager-server
+          rm -f server/dist/rdp-manager-server
+          ls -la server/dist/
+
+      - name: Артефакты серверного установщика
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-installers-${{ matrix.os }}
+          path: |
+            server/dist/RDPManager-Server-Setup-*.exe
+            server/dist/RDPManager-Server-*-linux-x64.tar.gz
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Публикация в GitHub Release (только на тегах v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RDP Manager ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            server/dist/RDPManager-Server-Setup-*.exe
+            server/dist/RDPManager-Server-*-linux-x64.tar.gz
