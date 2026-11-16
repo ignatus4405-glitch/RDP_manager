@@ -286,21 +286,31 @@ function showRdpForm(show) {
   $('rdpScreenWrap').classList.toggle('hidden', show);
 }
 
-/** Текст ошибки RDP с учётом IronErrorKind из WASM */
+/** Текст ошибки RDP с учётом IronErrorKind из WASM и сетевых ошибок */
 function rdpErrorText(err) {
   try {
     if (err && typeof err.kind === 'function') {
       const kind = err.kind();
-      if (kind === 1) return 'Неверный пароль (WrongPassword).';
-      if (kind === 2) return 'Вход на компьютер отклонён (LogonFailure).';
-      if (kind === 3) return 'Недостаточно прав (AccessDenied).';
-      if (kind === 4) return 'Ошибка RDCleanPath-обмена со шлюзом.';
-      if (kind === 5) return 'Не удалось подключиться к RDP-шлюзу на сервере.';
-      if (kind === 6) return 'Не удалось согласовать параметры RDP (NegotiationFailure). Узел требует NLA/TLS или не отвечает.';
+      if (kind === 1) return 'Неверный пароль. Проверьте учётные данные.';
+      if (kind === 2) return 'Вход на компьютер отклонён: пользователь или пароль не подошёл.';
+      if (kind === 3) return 'Недостаточно прав для входа на этот узел (AccessDenied).';
+      if (kind === 4) return 'Шлюз RDP Manager вернул ошибку (RDCleanPath). Проверьте, что узел есть в базе и сервер видит его по сети.';
+      if (kind === 5) return 'Не удалось подключиться к RDP-шлюзу на сервере. Проверьте, что сервер запущен и доступен по сети.';
+      if (kind === 6) return 'Не удалось согласовать параметры RDP (NegotiationFailure). Узел требует NLA/TLS, не является RDP-сервером или не отвечает.';
     }
   } catch { /* не IronError — отдаём message */ }
   const msg = String(err?.message || err || 'Неизвестная ошибка');
   if (/\b403\b/.test(msg)) return 'Шлюз отклонил цель: подключение не найдено в базе RDP Manager.';
+  if (/failed to fetch|load failed|network ?error|fetch is aborted/i.test(msg)) {
+    return 'Не удалось выполнить запрос к серверу. Проверьте сетевое подключение и что сервер RDP Manager запущен и доступен.';
+  }
+  if (/unexpected server response:\s*401/i.test(msg)) return 'Сессия истекла — войдите в RDP Manager заново.';
+  if (/unexpected server response:\s*404/i.test(msg)) return 'Сервер не знает адрес /ws/rdp — обновите сервер RDP Manager до версии 1.3.0 и новее.';
+  if (/unexpected server response:\s*5\d\d/i.test(msg)) return 'Шлюз сервера вернул ошибку 5xx. Смотрите логи сервера RDP Manager.';
+  if (/timed?\s*out|timeout|ETIMED/i.test(msg)) return 'Превышено время ожидания: узел не отвечает или сервер не имеет доступа к нему по сети (TCP 3389/порт RDP).';
+  if (/ECONNREFUSED/i.test(msg)) return 'Узел отклонил соединение (ECONNREFUSED). RDP не запущен на узле или порт закрыт.';
+  if (/ECONNRESET|EPIPE|socket hang up/i.test(msg)) return 'Соединение с узлом разорвано. Проверьте доступность узла и настройки NLA.';
+  if (/certificate/i.test(msg)) return 'Проблема с TLS-сертификатом узла.';
   return msg;
 }
 
