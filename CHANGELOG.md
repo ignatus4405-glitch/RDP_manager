@@ -6,6 +6,11 @@
 на основе [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) — вручную редактировать не нужно,
 если запись создаётся релиз-PR (см. CONTRIBUTING.md).
 
+## [Unreleased]
+
+### Исправлено
+- **Встроенный RDP: «Failed to fetch» при подключении.** WASM-модуль загружался через `fetch('data:application/wasm;base64,…')`, а наш CSP `connect-src` блокирует `data:` — отсюда TypeError на любом узле. Теперь байты WASM декодируются из data:URL в `ironrdp-entry.mjs` и передаются напрямую в `WebAssembly.instantiate` (сеть не используется). Ошибки подключения переведены в понятные сообщения: `Failed to fetch`/сеть, `401` (сессия истекла), `404` (сервер старее 1.3.0), `5xx` (логи сервера), таймаут/`ECONNREFUSED`/обрыв — с подсказкой, что проверить.
+
 ## [1.3.0] - 2026-11-16
 
 ### Добавлено

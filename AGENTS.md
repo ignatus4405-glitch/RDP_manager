@@ -55,7 +55,7 @@ release-please-config.json / .release-please-manifest.json — авто-верс
 Подробности и приватный репозиторий: CONTRIBUTING.md.
 
 ## Встроенный RDP (как в RDM) — как устроено
-- Клиент рендерит RDP на `<canvas>` через **IronRDP WASM** (`client/renderer/vendor/ironrdp/bundle.js`, собирается esbuild'ом из `renderer/ironrdp-entry.mjs`; wasm инлайнится как `data:` URL — никаких fetch/модулей с `file://`).
+- Клиент рендерит RDP на `<canvas>` через **IronRDP WASM** (`client/renderer/vendor/ironrdp/bundle.js`, собирается esbuild'ом из `renderer/ironrdp-entry.mjs`; WASM декодируется из data:URL в байты и передаётся в `WebAssembly.instantiate` напрямую — НИКАКОГО `fetch(data:)`: `connect-src` его блокирует).
 - Между WASM и RDP-узлом — **RDCleanPath** (ASN.1 DER поверх WebSocket). Шлюз на сервере: `server/src/rdp-gateway.js` (`/ws/rdp`, зависимость `ws`), адаптирован из electerm/ironrdp-wasm (MIT) + аутентификация и allowlist.
 - Аутентификация шлюза: `?token=<JWT>` из `sessionStorage`; цели сверяются с таблицей `connections` (`type='rdp'`, host case-insensitive, порт по умолчанию 3389) — open relay исключён. Пароль RDP через шлюз не логируется (CredSSP выполняет WASM-клиент).
 - Рендерер: полноэкранный `#rdpOverlay`, форма (username из карточки + пароль каждый раз), `desktopSize` по размеру окна (чётные, ≤1920×1080), ввод — PS/2-сканкоды (раскладка не влияет), буфер обмена — текст, `Esc` уходит в сессию (закрыть окно можно с формы).
