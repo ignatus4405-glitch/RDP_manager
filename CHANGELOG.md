@@ -6,13 +6,15 @@
 на основе [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) — вручную редактировать не нужно,
 если запись создаётся релиз-PR (см. CONTRIBUTING.md).
 
-## [Unreleased]
+## [1.1.1] - 2026-11-16
 
 ### Исправлено
-- Сборка клиента (electron-builder): `electron` перенесён из `dependencies` в `devDependencies` (раньше билд падал мгновенно с «Package electron is only allowed in devDependencies»); версия Electron закреплена точно (`45.3.3`, без `^`) — electron-builder требует exact version. Добавлены `author` и `license` (убраны предупреждения).
-- CI Build: публикация релиза перенесена с `electron-builder --publish` на `softprops/action-gh-release` (убрана гонка матрицы Windows/Linux и нестабильность publish); `latest(-linux).yml` генерируется отдельным скриптом `client/scripts/make-latest-yml.js`. Из `client/package.json` удалена секция `publish` — из-за неё electron-builder требовал GH_TOKEN даже при `--publish never` (сборка падала именно с этой ошибкой).
-- Смоук-тест сервера: на Windows ждём выхода дочернего процесса перед удалением временной папки SQLite (иначе EPERM/EBUSY); при падении сервера его лог выводится в ошибку.
-- Build запускается на каждый push любой ветки, а не только `main`/теги.
+- **Автообновление клиента**: секция `publish` (provider github) остаётся в конфиге electron-builder — именно она вшивает в сборку `app-update.yml` (адрес репозитория для electron-updater). Удаление секции чинило сборку, но ломало автообновление в рантайме; теперь сборка передаёт `GH_TOKEN` (его наличие обязательно даже при `--publish never`), а публикацией релиза по-прежнему занимается `softprops/action-gh-release`. В Build добавлен шаг проверки, что `app-update.yml` встроен в `*-unpacked/resources/` — иначе джоб падает.
+- **Внимание: установленный v1.1.0 собран без `app-update.yml` и не умеет автообновляться** — v1.1.1 ставится одноразово вручную, дальше обновления пойдут автоматически.
+- `electron` перенесён из `dependencies` в `devDependencies` с точной версией `45.3.3` (билд падал мгновенно: «only allowed in devDependencies» / «version is a range»). Добавлены `author`, `license`.
+- CI Build: публикация релиза перенесена на `softprops/action-gh-release` (нет гонки матрицы Windows/Linux); `latest(-linux).yml` генерируется отдельным скриптом `client/scripts/make-latest-yml.js` (sha512 + size).
+- Смоук-тест сервера: на Windows ждём выхода дочернего процесса перед удалением временной папки SQLite (EPERM/EBUSY); при падении сервера его лог выводится в ошибку.
+- Build запускается на каждый push в любую ветку, а не только в `main` и теги.
 
 ## [1.1.0] - 2026-11-16
 

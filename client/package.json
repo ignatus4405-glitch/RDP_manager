@@ -1,6 +1,6 @@
 {
   "name": "rdp-manager-client",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Десктоп-клиент RDP Manager: запуск RDP / AnyDesk / RustDesk подключений и просмотр документации",
   "main": "main.js",
@@ -39,7 +39,14 @@
       "category": "Utility",
       "icon": "assets/icon.png",
       "artifactName": "RDPManager-${version}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ignatus4405-glitch",
+        "repo": "RDP_manager"
+      }
+    ]
   },
   "engines": {
     "node": ">=22.5.0"
