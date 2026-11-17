@@ -3,7 +3,7 @@
  * RDP Manager — главный процесс Electron.
  * Окно приложения + безопасный запуск внешних программ (mstsc / AnyDesk / RustDesk).
  */
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require('electron');
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -159,6 +159,9 @@ function initAutoUpdates() {
 /* ---------- IPC ---------- */
 ipcMain.handle('launch-connection', (event, conn) => launchConnection(conn));
 ipcMain.handle('app-version', () => app.getVersion());
+/* Клипборд главного процесса: надёжно работает без разрешений renderer'а */
+ipcMain.handle('clipboard-read', () => clipboard.readText());
+ipcMain.handle('clipboard-write', (_event, text) => { clipboard.writeText(String(text ?? '')); return true; });
 ipcMain.handle('update-check', async () => {
   if (!app.isPackaged || !autoUpdater) return { packaged: false };
   try {

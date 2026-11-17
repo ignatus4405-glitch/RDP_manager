@@ -9,8 +9,12 @@ contextBridge.exposeInMainWorld('rdpManager', {
   launch: (conn) => ipcRenderer.invoke('launch-connection', conn),
   /** Версия приложения (строка, напр. "1.1.0") */
   version: () => ipcRenderer.invoke('app-version'),
-  /** Открыть внешнюю http(s) ссылку в браузере */
+  /** Внешняя ссылка в системном браузере (http/https) */
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  /** Прочитать системный буфер обмена (текст) — из главного процесса, без разрешений renderer'а */
+  readClipboard: () => ipcRenderer.invoke('clipboard-read'),
+  /** Записать текст в системный буфер обмена */
+  writeClipboard: (text) => ipcRenderer.invoke('clipboard-write', text),
   /** ОС клиента: win32 | linux | darwin */
   platform: process.platform,
   /** Проверка и установка обновлений из GitHub Releases */
