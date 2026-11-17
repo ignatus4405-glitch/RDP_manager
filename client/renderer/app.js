@@ -433,7 +433,8 @@ function attachRdpResizeOnce() {
 /** Буфер обмена (текст): двусторонний, через IPC главного процесса при наличии мостика. */
 const RDP_CLIPBOARD_POLL_MS = 800;
 let rdpClipboardTimer = null;
-const rdpClipboardState = { ignoreLocal: null, lastPushed: '' };
+let rdpClipboardSyncing = false;
+const rdpClipboardState = { ignoreLocal: null, lastPushed: null }; // null = в этой сессии ещё не пушили
 
 async function rdpReadLocalClipboard() {
   try {
@@ -446,39 +447,58 @@ async function rdpReadLocalClipboard() {
 async function rdpWriteLocalClipboard(text) {
   try {
     if (window.rdpManager?.writeClipboard) { await window.rdpManager.writeClipboard(text); return; }
-    await navigator.clipboard?.writeText?.(text);
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; }
+    // Запасной путь без secure context (веб-панель по http://): временный textarea + execCommand
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } finally { ta.remove(); }
   } catch { /* нет доступа к буферу — не критично */ }
 }
 
 async function rdpPushClipboardText(text) {
   const session = rdpSession.session;
-  if (!session || !window.IronRDP) return;
+  if (!session || !window.IronRDP) throw new Error('Сессия неактивна');
   const data = new window.IronRDP.ClipboardData();
   if (text) data.addText('text/plain', text);
   await session.onClipboardPaste(data);
   rdpClipboardState.lastPushed = text;
+  console.log(`[rdp] буфер: отправлено удалённому ${text ? `${text.length} симв.` : '(пусто)'}`);
 }
 
 /** Локальный буфер → удалённый: поллинг раз в 800 мс, только во время сессии. */
 function startRdpClipboardSync() {
   stopRdpClipboardSync();
-  let baseline = null;
+  rdpClipboardState.lastPushed = null; // первая итерация обязана запушить текущее содержимое
   rdpClipboardTimer = setInterval(async () => {
-    if (!rdpSession.session) return;
-    const text = await rdpReadLocalClipboard();
-    if (baseline === null) { baseline = text; rdpClipboardState.lastPushed = text; return; }
-    if (text === rdpClipboardState.ignoreLocal) { baseline = text; rdpClipboardState.ignoreLocal = null; return; } // записали из remote — не крутим обратно
-    if (text === baseline) return;
-    baseline = text;
-    try { await rdpPushClipboardText(text); }
-    catch (err) { console.warn('Clipboard (local→remote):', err); }
+    if (!rdpSession.session || rdpClipboardSyncing) return;
+    rdpClipboardSyncing = true;
+    try {
+      const text = await rdpReadLocalClipboard();
+      if (text === rdpClipboardState.ignoreLocal) {
+        // Мы сами записали этот текст из remote — в remote не отправляем
+        rdpClipboardState.ignoreLocal = null;
+        rdpClipboardState.lastPushed = text;
+        return;
+      }
+      if (text === rdpClipboardState.lastPushed) return;
+      await rdpPushClipboardText(text ?? '');
+    } catch (err) {
+      // Важно: lastPushed не обновляем — содержимое будет отправлено на следующей итерации
+      console.warn('Clipboard (local→remote):', err);
+    } finally {
+      rdpClipboardSyncing = false;
+    }
   }, RDP_CLIPBOARD_POLL_MS);
 }
 
 function stopRdpClipboardSync() {
   if (rdpClipboardTimer) { clearInterval(rdpClipboardTimer); rdpClipboardTimer = null; }
+  rdpClipboardSyncing = false;
   rdpClipboardState.ignoreLocal = null;
-  rdpClipboardState.lastPushed = '';
+  rdpClipboardState.lastPushed = null;
 }
 
 /** Буфер обмена: remote ↔ local (текст). Локальный буфер поллим, пока сессия активна. */
