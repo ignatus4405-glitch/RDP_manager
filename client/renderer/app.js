@@ -266,8 +266,10 @@ const RDP_SCANCODE_MAP = {
 const rdpSession = {
   conn: null,
   session: null,
-  clipboardReady: false,
   inputAttached: false,
+  resizeAttached: false,
+  lastSizeW: 0,
+  lastSizeH: 0,
 };
 
 const rdpConnAddress = (conn) =>
@@ -369,7 +371,9 @@ function openEmbeddedRdp(conn) {
 function teardownRdpSession() {
   const s = rdpSession.session;
   rdpSession.session = null;
-  rdpSession.clipboardReady = false;
+  rdpSession.lastSizeW = 0;
+  rdpSession.lastSizeH = 0;
+  stopRdpClipboardSync();
   if (s) { try { s.shutdown(); } catch { /* уже завершена */ } }
   $('rdpDisconnectBtn').disabled = true;
 }
@@ -382,33 +386,126 @@ function closeEmbeddedRdp() {
   $('rdpOverlay').classList.add('hidden');
 }
 
-/** Буфер обмена: remote → clipboard браузера, local → remote по запросу RDCleanPath */
-function setupRdpClipboard(builder, IronRDP) {
+/**
+ * Размер десктопа: всё доступное пространство под канвой (внутри .rdp-body),
+ * чётные значения, разумные пределы (RDP). Вызывается при подключении и при изменении окна.
+ */
+function rdpAvailableSize() {
+  const body = document.querySelector('.rdp-body');
+  const rect = body ? body.getBoundingClientRect() : { width: 0, height: 0 };
+  const even = (n) => Math.max(2, Math.floor(n / 2) * 2);
+  const width = Math.min(4096, Math.max(640, even(rect.width || window.innerWidth)));
+  const height = Math.min(2160, Math.max(480, even(rect.height || (window.innerHeight - 46))));
+  return { width, height };
+}
+
+/** Попросить удалённый рабочий стол сменить разрешение (display control). */
+function requestRdpResize(force) {
+  const session = rdpSession.session;
+  if (!session) return;
+  const { width, height } = rdpAvailableSize();
+  if (!force && width === rdpSession.lastSizeW && height === rdpSession.lastSizeH) return;
+  try {
+    session.resize(width, height);
+    const canvas = $('rdpCanvas');
+    canvas.width = width;
+    canvas.height = height;
+    rdpSession.lastSizeW = width;
+    rdpSession.lastSizeH = height;
+    setRdpStatus(`Подключено · ${width}×${height}`, 'connected');
+  } catch (err) {
+    console.warn('RDP resize:', err);
+  }
+}
+
+/** Следим за изменением размеров окна (с debounce). */
+function attachRdpResizeOnce() {
+  if (rdpSession.resizeAttached) return;
+  rdpSession.resizeAttached = true;
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!rdpSession.session) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => requestRdpResize(false), 250);
+  });
+}
+
+/** Буфер обмена (текст): двусторонний, через IPC главного процесса при наличии мостика. */
+const RDP_CLIPBOARD_POLL_MS = 800;
+let rdpClipboardTimer = null;
+const rdpClipboardState = { ignoreLocal: null, lastPushed: '' };
+
+async function rdpReadLocalClipboard() {
+  try {
+    if (window.rdpManager?.readClipboard) return await window.rdpManager.readClipboard();
+    const text = await navigator.clipboard?.readText?.();
+    return typeof text === 'string' ? text : '';
+  } catch { return ''; }
+}
+
+async function rdpWriteLocalClipboard(text) {
+  try {
+    if (window.rdpManager?.writeClipboard) { await window.rdpManager.writeClipboard(text); return; }
+    await navigator.clipboard?.writeText?.(text);
+  } catch { /* нет доступа к буферу — не критично */ }
+}
+
+async function rdpPushClipboardText(text) {
+  const session = rdpSession.session;
+  if (!session || !window.IronRDP) return;
+  const data = new window.IronRDP.ClipboardData();
+  if (text) data.addText('text/plain', text);
+  await session.onClipboardPaste(data);
+  rdpClipboardState.lastPushed = text;
+}
+
+/** Локальный буфер → удалённый: поллинг раз в 800 мс, только во время сессии. */
+function startRdpClipboardSync() {
+  stopRdpClipboardSync();
+  let baseline = null;
+  rdpClipboardTimer = setInterval(async () => {
+    if (!rdpSession.session) return;
+    const text = await rdpReadLocalClipboard();
+    if (baseline === null) { baseline = text; rdpClipboardState.lastPushed = text; return; }
+    if (text === rdpClipboardState.ignoreLocal) { baseline = text; rdpClipboardState.ignoreLocal = null; return; } // записали из remote — не крутим обратно
+    if (text === baseline) return;
+    baseline = text;
+    try { await rdpPushClipboardText(text); }
+    catch (err) { console.warn('Clipboard (local→remote):', err); }
+  }, RDP_CLIPBOARD_POLL_MS);
+}
+
+function stopRdpClipboardSync() {
+  if (rdpClipboardTimer) { clearInterval(rdpClipboardTimer); rdpClipboardTimer = null; }
+  rdpClipboardState.ignoreLocal = null;
+  rdpClipboardState.lastPushed = '';
+}
+
+/** Буфер обмена: remote ↔ local (текст). Локальный буфер поллим, пока сессия активна. */
+function setupRdpClipboard(builder) {
   builder.remoteClipboardChangedCallback((clipboardData) => {
-    rdpSession.clipboardReady = true;
     try {
       if (!clipboardData || clipboardData.isEmpty()) return;
       const textItem = clipboardData.items().find((item) => String(item.mimeType()).includes('text/plain'));
       const value = textItem && textItem.value();
-      if (typeof value === 'string' && value) navigator.clipboard?.writeText(value).catch(() => {});
+      if (typeof value === 'string' && value) {
+        rdpClipboardState.ignoreLocal = value; // чтобы поллинг не вернул это обратно в remote
+        rdpWriteLocalClipboard(value);
+      }
     } catch (err) {
       console.warn('Clipboard (remote→local):', err);
     }
   });
 
+  // Канал CLIPRDR просит наш список форматов (при инициализации и далее, когда remote ждёт
+  // наши данные) — пушим текущее содержимое локального буфера
   builder.forceClipboardUpdateCallback(async () => {
-    if (rdpSession.clipboardReady) return;
-    rdpSession.clipboardReady = true;
     try {
-      const text = await navigator.clipboard.readText();
-      const data = new IronRDP.ClipboardData();
-      if (text) data.addText('text/plain', text);
-      if (rdpSession.session) await rdpSession.session.onClipboardPaste(data);
-    } catch {
-      try {
-        const data = new IronRDP.ClipboardData();
-        if (rdpSession.session) await rdpSession.session.onClipboardPaste(data);
-      } catch { /* буфер недоступен — не критично */ }
+      const text = await rdpReadLocalClipboard();
+      await rdpPushClipboardText(text);
+    } catch (err) {
+      console.warn('Clipboard (local→remote):', err);
+      try { await rdpPushClipboardText(''); } catch { /* буфер недоступен — не критично */ }
     }
   });
 }
@@ -504,16 +601,15 @@ async function startEmbeddedRdp() {
     await IronRDP.init();
     try { IronRDP.setup('info'); } catch { /* логирование не критично */ }
 
-    // Размер десктопа: почти весь экран, чётные значения, не больше 1920×1080
-    const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-    const width = Math.min(1920, Math.max(800, even(window.innerWidth - 80)));
-    const height = Math.min(1080, Math.max(600, even(window.innerHeight - 220)));
+    // Размер десктопа: всё доступное пространство .rdp-body, чётные значения
+    const { width, height } = rdpAvailableSize();
 
     const canvas = $('rdpCanvas');
     canvas.width = width;
     canvas.height = height;
 
     const enableCredssp = new IronRDP.Extension('enable_credssp', true);
+    const enableDisplayControl = new IronRDP.Extension('display_control', true);
     const builder = new IronRDP.SessionBuilder();
     builder.username(username);
     builder.password(password);
@@ -523,9 +619,10 @@ async function startEmbeddedRdp() {
     builder.desktopSize(new IronRDP.DesktopSize(width, height));
     builder.renderCanvas(canvas);
     builder.extension(enableCredssp);
+    builder.extension(enableDisplayControl);
     builder.setCursorStyleCallbackContext(canvas);
     builder.setCursorStyleCallback((style) => { canvas.style.cursor = style || 'default'; });
-    setupRdpClipboard(builder, IronRDP);
+    setupRdpClipboard(builder);
 
     showRdpForm(false);
     setRdpStatus('Подключение…', 'connecting');
@@ -534,19 +631,21 @@ async function startEmbeddedRdp() {
 
     const session = await builder.connect();
     rdpSession.session = session;
-    rdpSession.clipboardReady = false;
 
     const ds = session.desktopSize();
     canvas.width = ds.width;
     canvas.height = ds.height;
+    rdpSession.lastSizeW = ds.width;
+    rdpSession.lastSizeH = ds.height;
 
     attachRdpInputOnce();
+    attachRdpResizeOnce();
+    startRdpClipboardSync();
     $('rdpPassword').value = '';
     $('rdpDisconnectBtn').disabled = false;
     setRdpStatus(`Подключено · ${ds.width}×${ds.height}`, 'connected');
     $('rdpScreenHint').classList.add('hidden');
     canvas.focus();
-
     session.run().then((info) => {
       let reason = '';
       try { reason = info?.reason ? info.reason() : ''; } catch { /* ignore */ }
