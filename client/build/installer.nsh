@@ -67,7 +67,11 @@ Function RdpComponentsPageCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Компоненты и данные сервера" "Выберите состав установки и папку базы данных."
+  ; Страница наследует MUI-заголовок предыдущего шага; задаём свой текст.
+  GetDlgItem $0 $HWNDPARENT 1037
+  SendMessage $0 0x000C 0 "STR:Компоненты и данные сервера"
+  GetDlgItem $0 $HWNDPARENT 1038
+  SendMessage $0 0x000C 0 "STR:Выберите состав установки и папку базы данных."
   nsDialogs::Create 1018
   Pop $RdpComponentsDialog
   ${If} $RdpComponentsDialog == error
