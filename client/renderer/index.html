@@ -196,12 +196,16 @@
     </div>
     <span id="rdpStatus" class="rdp-status" data-kind="idle">Не подключено</span>
     <div class="rdp-actions">
+      <button id="rdpFileSend" class="btn-ghost" disabled>Передать файлы</button>
+      <button id="rdpFileReceive" class="btn-ghost" disabled>Получить файлы</button>
+      <input id="rdpFileInput" type="file" multiple class="hidden" />
       <button id="rdpFillBtn" class="btn-ghost" title="Растянуть сессию на всё окно">⤢ Растянуть</button>
       <button id="rdpExternalBtn" class="btn-ghost" title="Открыть в системном RDP-клиенте (mstsc / remmina)">Во внешнем клиенте</button>
       <button id="rdpDisconnectBtn" class="btn-danger" disabled>Отключиться</button>
       <button id="rdpCloseBtn" class="icon-btn" aria-label="Закрыть">✕</button>
     </div>
   </div>
+  <div id="rdpFileStatus" class="rdp-file-status" role="status"></div>
   <div class="rdp-body">
     <form id="rdpConnectForm" class="rdp-connect-form">
       <h3>Подключение к «<span id="rdpFormName"></span>»</h3>
@@ -225,6 +229,7 @@
 
 <script src="vendor/ironrdp/bundle.js"></script>
 <script src="md.js"></script>
+<script src="rdp-file-transfer.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -285,6 +285,8 @@ button { font-family: inherit; cursor: pointer; }
 .rdp-status[data-kind="error"]       { color: #fca5a5; border-color: #ef444466; background: #ef444414; }
 .rdp-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .rdp-actions .btn-ghost, .rdp-actions .btn-danger { padding: 8px 13px; font-size: 12px; }
+.rdp-file-status { color: var(--muted); background: var(--panel); font-size: 12px; padding: 0 16px; }
+.rdp-file-status:not(:empty) { padding: 7px 16px; }
 .rdp-body { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 
 .rdp-connect-form {
