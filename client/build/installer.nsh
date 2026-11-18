@@ -6,7 +6,7 @@
 !define RDP_COMPONENTS_KEY "Software\RDP Manager\Components"
 !define RDP_SERVICE_ID "RDPManagerServer"
 !define RDP_FIREWALL_RULE "RDP Manager Server (TCP 8720)"
-!define RDP_SERVER_DATA "$COMMONAPPDATA\RDP Manager Server"
+!define RDP_SERVER_DATA "$%PROGRAMDATA%\RDP Manager Server"
 !define RDP_LEGACY_SERVER "$PROGRAMFILES64\RDP Manager Server"
 !define RDP_SERVER_PAYLOAD "${BUILD_RESOURCES_DIR}\server-payload"
 
