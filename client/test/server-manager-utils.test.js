@@ -19,6 +19,18 @@ test('service status parser handles running, stopped, and missing services', () 
   });
 });
 
+test('service status parser handles localized OEM output decoded as UTF-8', () => {
+  const corruptedOutput = '���_����: RDPManagerServer\n        ��� : 10 WIN32_OWN_PROCESS\n        ��������� : 4 RUNNING (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\n        ���_Win32 : 0 (0x0)';
+  assert.deepEqual(parseServiceStatus(corruptedOutput, 0), {
+    installed: true, state: 'running', stateCode: 4,
+  });
+  assert.deepEqual(parseServiceStatus('���� : 1 STOPPED', 0), {
+    installed: true, state: 'stopped', stateCode: 1,
+  });
+  assert.equal(parseServiceStatus('���� : 10 WIN32_OWN_PROCESS\n���� : 4 (0x4)', 0).state, 'unknown');
+  assert.equal(parseServiceStatus('STATE : 4 RUNNING', 5).state, 'unknown');
+});
+
 test('server log reader returns only the bounded tail and handles a missing file', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdp-manager-log-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -67,6 +67,11 @@ Function RdpComponentsPageCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
+  ; Страница наследует MUI-заголовок предыдущего шага; задаём свой текст.
+  GetDlgItem $0 $HWNDPARENT 1037
+  SendMessage $0 0x000C 0 "STR:Компоненты и данные сервера"
+  GetDlgItem $0 $HWNDPARENT 1038
+  SendMessage $0 0x000C 0 "STR:Выберите состав установки и папку базы данных."
   nsDialogs::Create 1018
   Pop $RdpComponentsDialog
   ${If} $RdpComponentsDialog == error
@@ -76,24 +81,24 @@ Function RdpComponentsPageCreate
   ${NSD_CreateLabel} 0 0 100% 16u "Выберите компоненты для установки:"
   Pop $0
 
-  ${NSD_CreateRadioButton} 0 22u 100% 12u "Только десктоп-клиент"
+  ${NSD_CreateRadioButton} 0 18u 100% 12u "Только десктоп-клиент"
   Pop $RdpRadioClient
 
-  ${NSD_CreateRadioButton} 0 43u 100% 12u "Серверная служба + графическое управление"
+  ${NSD_CreateRadioButton} 0 36u 100% 12u "Серверная служба + графическое управление"
   Pop $RdpRadioServer
 
-  ${NSD_CreateRadioButton} 0 64u 100% 12u "Клиент и сервер"
+  ${NSD_CreateRadioButton} 0 54u 100% 12u "Клиент и сервер"
   Pop $RdpRadioBoth
 
-  ${NSD_CreateLabel} 0 91u 100% 14u "Папка базы и ключа сервера (можно выбрать другой диск):"
+  ${NSD_CreateLabel} 0 76u 100% 12u "Папка базы и ключа сервера:"
   Pop $0
-  ${NSD_CreateText} 0 108u 75% 14u ""
+  ${NSD_CreateText} 0 91u 75% 14u ""
   Pop $RdpDataDirectoryInput
   ${NSD_SetText} $RdpDataDirectoryInput "$RdpDataDirectory"
-  ${NSD_CreateButton} 77% 108u 23% 14u "Обзор…"
+  ${NSD_CreateButton} 77% 91u 23% 14u "Обзор…"
   Pop $RdpBrowseDataButton
   ${NSD_OnClick} $RdpBrowseDataButton RdpBrowseForDataDirectory
-  ${NSD_CreateLabel} 0 130u 100% 20u "Используется только при выборе серверного компонента; логи останутся в ProgramData."
+  ${NSD_CreateLabel} 0 112u 100% 12u "Журналы сервера остаются в ProgramData."
   Pop $0
 
   ${If} $RdpInstallClient == "1"
