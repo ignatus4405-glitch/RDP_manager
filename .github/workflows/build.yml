@@ -60,7 +60,7 @@ jobs:
         run: |
           npm run dist --workspace client > dist.log 2>&1 || {
             echo "----- сообщения об ошибках electron-builder -----"
-            grep -i -C 3 -E 'ERR!|⨯|error:|failed|fatal|not found|cannot|exception|NSIS Error' dist.log | grep -vi '^npm error' | tail -n 8 | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g' | sed 's/^/::error::/' || true
+            grep -i -B 12 -A 3 -E 'warning treated as error|NSIS Error|ERR!|⨯|fatal|not found|cannot|exception' dist.log | tail -n 8 | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g' | sed 's/^/::error::/' || true
             echo "----- конец полного вывода electron-builder -----"
             tail -n 60 dist.log
             exit 1
