@@ -2,11 +2,16 @@
 ; Этот файл подключается electron-builder через build.nsis.include.
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!include "StrFunc.nsh"
+!ifndef BUILD_UNINSTALLER
+${StrStr}
+!endif
 
 !define RDP_COMPONENTS_KEY "Software\RDP Manager\Components"
 !define RDP_SERVICE_ID "RDPManagerServer"
 !define RDP_FIREWALL_RULE "RDP Manager Server (TCP 8720)"
 !define RDP_SERVER_DATA "$%PROGRAMDATA%\RDP Manager Server"
+!define RDP_SERVER_DB "${RDP_SERVER_DATA}\data"
 !define RDP_LEGACY_SERVER "$PROGRAMFILES64\RDP Manager Server"
 !define RDP_SERVER_PAYLOAD "${BUILD_RESOURCES_DIR}\server-payload"
 
@@ -16,11 +21,20 @@ Var RdpRadioClient
 Var RdpRadioServer
 Var RdpRadioBoth
 Var RdpComponentsDialog
+Var RdpDataDirectory
+Var RdpPreviousDataDirectory
+Var RdpDataDirectoryInput
+Var RdpBrowseDataButton
 
 !macro customInit
   ; Сохраняем выбор компонентов. Для обновления со старых отдельных установщиков определяем их по файлам.
   StrCpy $RdpInstallClient "0"
   StrCpy $RdpInstallServer "0"
+  ReadRegStr $RdpDataDirectory HKLM "${RDP_COMPONENTS_KEY}" "ServerDataDir"
+  ${If} $RdpDataDirectory == ""
+    StrCpy $RdpDataDirectory "${RDP_SERVER_DB}"
+  ${EndIf}
+  StrCpy $RdpPreviousDataDirectory "$RdpDataDirectory"
   ReadRegStr $0 HKLM "${RDP_COMPONENTS_KEY}" "ClientInstalled"
   ReadRegStr $1 HKLM "${RDP_COMPONENTS_KEY}" "ServerInstalled"
   ${If} $0 != ""
@@ -41,12 +55,12 @@ Var RdpComponentsDialog
   ${EndIf}
 !macroend
 
-!macro customHeader
-  ; Этот hook вызывается после assistedInstaller.nsh, чтобы страница была зарегистрирована
-  ; после выбора папки установки и до начала копирования файлов.
+!macro customPageAfterChangeDir
+  ; Экран выбора компонентов и каталога базы должен предшествовать распаковке/установке файлов.
   Page custom RdpComponentsPageCreate RdpComponentsPageLeave
 !macroend
 
+!ifndef BUILD_UNINSTALLER
 Function RdpComponentsPageCreate
   ${If} ${Silent}
     Abort
@@ -62,17 +76,22 @@ Function RdpComponentsPageCreate
 
   ${NSD_CreateRadioButton} 0 22u 100% 12u "Только десктоп-клиент"
   Pop $RdpRadioClient
-  ${NSD_CreateLabel} 18u 36u 94% 20u "Подключения сотрудников, встроенный RDP и документация."
-  Pop $0
 
-  ${NSD_CreateRadioButton} 0 63u 100% 12u "Серверная служба + графическое управление"
+  ${NSD_CreateRadioButton} 0 43u 100% 12u "Серверная служба + графическое управление"
   Pop $RdpRadioServer
-  ${NSD_CreateLabel} 18u 77u 94% 34u "Служба Windows с автозапуском и восстановлением после сбоя; окно управления, значок в трее и просмотр логов."
-  Pop $0
 
-  ${NSD_CreateRadioButton} 0 119u 100% 12u "Клиент и сервер"
+  ${NSD_CreateRadioButton} 0 64u 100% 12u "Клиент и сервер"
   Pop $RdpRadioBoth
-  ${NSD_CreateLabel} 18u 133u 94% 20u "Установить обе части на этот компьютер."
+
+  ${NSD_CreateLabel} 0 91u 100% 14u "Папка базы и ключа сервера (можно выбрать другой диск):"
+  Pop $0
+  ${NSD_CreateText} 0 108u 75% 14u ""
+  Pop $RdpDataDirectoryInput
+  ${NSD_SetText} $RdpDataDirectoryInput "$RdpDataDirectory"
+  ${NSD_CreateButton} 77% 108u 23% 14u "Обзор…"
+  Pop $RdpBrowseDataButton
+  ${NSD_OnClick} $RdpBrowseDataButton RdpBrowseForDataDirectory
+  ${NSD_CreateLabel} 0 130u 100% 20u "Используется только при выборе серверного компонента; логи останутся в ProgramData."
   Pop $0
 
   ${If} $RdpInstallClient == "1"
@@ -85,6 +104,15 @@ Function RdpComponentsPageCreate
   ${EndIf}
 
   nsDialogs::Show
+FunctionEnd
+
+Function RdpBrowseForDataDirectory
+  ${NSD_GetText} $RdpDataDirectoryInput $RdpDataDirectory
+  nsDialogs::SelectFolderDialog "Выберите папку базы данных сервера" "$RdpDataDirectory"
+  Pop $0
+  ${If} $0 != error
+    ${NSD_SetText} $RdpDataDirectoryInput "$0"
+  ${EndIf}
 FunctionEnd
 
 Function RdpComponentsPageLeave
@@ -101,26 +129,60 @@ Function RdpComponentsPageLeave
     StrCpy $RdpInstallClient "1"
     StrCpy $RdpInstallServer "1"
   ${EndIf}
+
+  ${NSD_GetText} $RdpDataDirectoryInput $RdpDataDirectory
+  ${If} $RdpInstallServer == "1"
+    ${If} $RdpDataDirectory == ""
+      MessageBox MB_ICONSTOP "Укажите папку для базы и ключа серверной части."
+      Abort
+    ${EndIf}
+    ; Только абсолютные пути на дисках; корень диска не подходит.
+    StrCpy $0 $RdpDataDirectory 1 1
+    StrCpy $1 $RdpDataDirectory 1 2
+    ${If} $0 != ":"
+    ${OrIf} $1 != "\"
+      MessageBox MB_ICONSTOP "Выберите абсолютный путь на локальном диске."
+      Abort
+    ${EndIf}
+    GetFullPathName $RdpDataDirectory "$RdpDataDirectory"
+    StrLen $0 $RdpDataDirectory
+    ${If} $0 <= 3
+      MessageBox MB_ICONSTOP "Выберите отдельную папку, а не корень диска."
+      Abort
+    ${EndIf}
+    ${StrStr} $0 "$RdpDataDirectory" "%"
+    ${If} $0 != ""
+      MessageBox MB_ICONSTOP "Путь не должен содержать знак процента (%). Выберите другую папку."
+      Abort
+    ${EndIf}
+  ${EndIf}
 FunctionEnd
+
+!endif
 
 !macro migrateLegacyServer
   ; Убираем старый установщик сервера даже при выборе «только клиент», чтобы не оставить скрытую службу.
   ${If} ${FileExists} "${RDP_LEGACY_SERVER}\rdp-manager-server.exe"
     DetailPrint "Останавливаю старый сервер и переношу его данные…"
-    CreateDirectory "${RDP_SERVER_DATA}\data"
+    ${If} $RdpInstallServer == "1"
+      StrCpy $1 "$RdpDataDirectory"
+    ${Else}
+      StrCpy $1 "$RdpPreviousDataDirectory"
+    ${EndIf}
+    CreateDirectory "$1"
     ExecWait 'schtasks /End /TN "RDP Manager Server"' $0
     ExecWait 'schtasks /Delete /TN "RDP Manager Server" /F' $0
     ExecWait 'taskkill /F /IM rdp-manager-server.exe' $0
     Sleep 1200
-    ${IfNot} ${FileExists} "${RDP_SERVER_DATA}\data\rdp-manager.db"
+    ${IfNot} ${FileExists} "$1\rdp-manager.db"
       ${If} ${FileExists} "${RDP_LEGACY_SERVER}\data\rdp-manager.db"
         ClearErrors
-        CopyFiles /SILENT "${RDP_LEGACY_SERVER}\data\*.*" "${RDP_SERVER_DATA}\data"
+        CopyFiles /SILENT "${RDP_LEGACY_SERVER}\data\*.*" "$1"
         ${If} ${Errors}
           MessageBox MB_ICONSTOP "Не удалось перенести базу и ключ старого сервера. Старые данные сохранены в Program Files; исправьте доступ и повторите установку."
           Abort
         ${EndIf}
-        ${IfNot} ${FileExists} "${RDP_SERVER_DATA}\data\rdp-manager.db"
+        ${IfNot} ${FileExists} "$1\rdp-manager.db"
           MessageBox MB_ICONSTOP "После переноса не найдена база старого сервера. Старые данные сохранены; повторите установку."
           Abort
         ${EndIf}
@@ -145,15 +207,50 @@ FunctionEnd
     File "${RDP_SERVER_PAYLOAD}\rdp-manager-server.exe"
     File "${RDP_SERVER_PAYLOAD}\RDPManagerServer.exe"
     File "${RDP_SERVER_PAYLOAD}\RDPManagerServer.xml"
+    File "${BUILD_RESOURCES_DIR}\configure-server-data.ps1"
     File "${RDP_SERVER_PAYLOAD}\WinSW-LICENSE.txt"
     File "${RDP_SERVER_PAYLOAD}\server-version.txt"
     SetOutPath "$INSTDIR\server\web"
     File /r "${RDP_SERVER_PAYLOAD}\web\*.*"
 
-    CreateDirectory "${RDP_SERVER_DATA}\data"
+    ; Старая служба уже остановлена деинсталлятором предыдущей версии.
+    ; Копируем, но не удаляем исходные данные, чтобы восстановление было возможным.
+    ${If} $RdpPreviousDataDirectory != $RdpDataDirectory
+    ${AndIf} ${FileExists} "$RdpPreviousDataDirectory\rdp-manager.db"
+      ${If} ${FileExists} "$RdpDataDirectory\rdp-manager.db"
+        MessageBox MB_ICONSTOP "В выбранной папке уже есть база. Выберите пустую папку, чтобы не потерять существующие данные."
+        Abort
+      ${EndIf}
+      CreateDirectory "$RdpDataDirectory"
+      ClearErrors
+      CopyFiles /SILENT "$RdpPreviousDataDirectory\*.*" "$RdpDataDirectory"
+      ${If} ${Errors}
+        MessageBox MB_ICONSTOP "Не удалось скопировать данные сервера. Исходные файлы сохранены."
+        Abort
+      ${EndIf}
+      ${IfNot} ${FileExists} "$RdpDataDirectory\rdp-manager.db"
+        MessageBox MB_ICONSTOP "Не удалось проверить копию базы. Исходные файлы сохранены."
+        Abort
+      ${EndIf}
+    ${EndIf}
+    CreateDirectory "$RdpDataDirectory"
+    ${IfNot} ${FileExists} "$RdpDataDirectory\."
+      MessageBox MB_ICONSTOP "Не удалось создать папку базы данных."
+      Abort
+    ${EndIf}
     CreateDirectory "${RDP_SERVER_DATA}\logs"
 
-    ; Стандартные пользователи могут просматривать логи в GUI; каталог данных остаётся закрытым.
+    ; Передаём путь через переменные процесса, а XML сериализует PowerShell (без подстановки в командную строку).
+    System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_DATA", w "$RdpDataDirectory") i .r0'
+    System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_XML", w "$INSTDIR\server\RDPManagerServer.xml") i .r0'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\server\configure-server-data.ps1"'
+    Pop $0
+    ${If} $0 != 0
+      MessageBox MB_ICONSTOP "Не удалось настроить путь базы для службы (код $0)."
+      Abort
+    ${EndIf}
+
+    ; Стандартные пользователи могут просматривать логи в GUI. Права папки базы наследуются.
     ExecWait '"$SYSDIR\icacls.exe" "${RDP_SERVER_DATA}\logs" /grant "*S-1-5-32-545:(OI)(CI)RX" /T /C' $0
 
     ; WinSW регистрирует настоящий Windows Service. Приложение пишет server.log, WinSW ротирует stdout/stderr.
@@ -175,6 +272,11 @@ FunctionEnd
 
   WriteRegStr HKLM "${RDP_COMPONENTS_KEY}" "ClientInstalled" "$RdpInstallClient"
   WriteRegStr HKLM "${RDP_COMPONENTS_KEY}" "ServerInstalled" "$RdpInstallServer"
+  ${If} $RdpInstallServer == "1"
+    WriteRegStr HKLM "${RDP_COMPONENTS_KEY}" "ServerDataDir" "$RdpDataDirectory"
+  ${Else}
+    WriteRegStr HKLM "${RDP_COMPONENTS_KEY}" "ServerDataDir" "$RdpPreviousDataDirectory"
+  ${EndIf}
   ${If} $RdpInstallServer == "1"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "RDPManagerServerManager" "$\"$INSTDIR\${APP_EXECUTABLE_FILENAME}$\" --server-manager --server-manager-tray"
   ${Else}
@@ -211,14 +313,28 @@ FunctionEnd
   SetShellVarContext all
   Delete "$SMPROGRAMS\RDP Manager.lnk"
   RMDir /r "$SMPROGRAMS\RDP Manager"
-  DeleteRegKey HKLM "${RDP_COMPONENTS_KEY}"
+  ReadRegStr $RdpDataDirectory HKLM "${RDP_COMPONENTS_KEY}" "ServerDataDir"
+  ${If} $RdpDataDirectory == ""
+    StrCpy $RdpDataDirectory "${RDP_SERVER_DB}"
+  ${EndIf}
+  ${IfNot} ${isUpdated}
+    DeleteRegValue HKLM "${RDP_COMPONENTS_KEY}" "ClientInstalled"
+    DeleteRegValue HKLM "${RDP_COMPONENTS_KEY}" "ServerInstalled"
+  ${EndIf}
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "RDPManagerServerManager"
 
   ${IfNot} ${Silent}
-    ${If} ${FileExists} "${RDP_SERVER_DATA}\data\rdp-manager.db"
+    ${If} ${FileExists} "$RdpDataDirectory\rdp-manager.db"
     ${OrIf} ${FileExists} "${RDP_SERVER_DATA}\logs\server.log"
-      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Удалить базу данных сервера и логи из %ProgramData%?$\r$\n$\r$\nНет — сохранить (рекомендуется)." IDNO rdp_keep_server_data
-        RMDir /r "${RDP_SERVER_DATA}"
+      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Удалить файлы базы из $RdpDataDirectory и журналы сервера?$\r$\n$\r$\nНет — сохранить (рекомендуется)." IDNO rdp_keep_server_data
+        ; Никогда не удаляем выбранный пользователем каталог целиком.
+        Delete "$RdpDataDirectory\rdp-manager.db"
+        Delete "$RdpDataDirectory\rdp-manager.db-wal"
+        Delete "$RdpDataDirectory\rdp-manager.db-shm"
+        Delete "$RdpDataDirectory\secret.key"
+        RMDir /r "${RDP_SERVER_DATA}\logs"
+        RMDir "$RdpDataDirectory"
+        DeleteRegValue HKLM "${RDP_COMPONENTS_KEY}" "ServerDataDir"
       rdp_keep_server_data:
     ${EndIf}
   ${EndIf}
