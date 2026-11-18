@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('rdpManager', {
   updates: {
     /** Ручная проверка. Возвращает { packaged, version?, error? } — packaged:false в dev-режиме */
     check: () => ipcRenderer.invoke('update-check'),
+    state: () => ipcRenderer.invoke('update-state'),
+    onState: (cb) => bindChannel('update-state', cb),
     /** Перезапустить и установить загруженное обновление */
     install: () => ipcRenderer.invoke('update-install'),
     /** Подписка на «доступна новая версия» (версия придёт аргументом) */

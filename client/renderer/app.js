@@ -1066,76 +1066,73 @@ function openReleasePage() {
   else window.open(updateReleaseUrl, '_blank', 'noopener');
 }
 
-function showUpdateBanner(mode, version) {
-  const banner = $('updateBanner');
-  const text = $('updateBannerText');
-  const btn = $('updateBannerBtn');
-  banner.className = 'update-banner' + (mode === 'ready' ? ' ready' : mode === 'downloading' ? ' downloading' : '');
-  if (mode === 'ready') {
-    text.textContent = `Новая версия ${version} загружена и будет установлена при выходе`;
-    btn.textContent = 'Установить и перезапустить';
-    btn.onclick = () => window.rdpManager?.updates?.install();
-  } else if (mode === 'downloading') {
-    text.textContent = `Доступна новая версия ${version}. Идёт загрузка обновления…`;
-    btn.textContent = 'Перейти к релизу';
-    btn.onclick = openReleasePage;
-  } else {
-    text.textContent = `Доступна новая версия ${version}. Рекомендуем обновиться.`;
-    btn.textContent = 'Скачать';
-    btn.onclick = openReleasePage;
+function showUpdateBanner(mode, version, detail = '') {
+  const ready = mode === 'ready';
+  const downloading = mode === 'downloading';
+  const message = ready ? `Версия ${version} загружена и готова к установке.`
+    : downloading ? `Загрузка версии ${version || ''}${detail ? `: ${detail}%` : '…'}`
+    : `Не удалось обновить автоматически: ${detail}. Можно скачать установщик.`;
+  for (const [bannerId, textId, buttonId] of [
+    ['updateBanner', 'updateBannerText', 'updateBannerBtn'],
+    ['loginUpdateBanner', 'loginUpdateText', 'loginUpdateBtn'],
+  ]) {
+    const banner = $(bannerId);
+    banner.className = `update-banner${ready ? ' ready' : downloading ? ' downloading' : ''}`;
+    $(textId).textContent = message;
+    const btn = $(buttonId);
+    btn.textContent = ready ? 'Установить' : 'Открыть релиз';
+    btn.onclick = ready ? installUpdate : openReleasePage;
   }
-  banner.classList.remove('hidden');
 }
 
-/** Проверка по GitHub Releases API — работает и в dev, и в браузерном режиме */
-async function checkForUpdatesViaGitHub() {
+async function installUpdate() {
   try {
-    const res = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json' },
-    });
-    if (!res.ok) return null;
-    const rel = await res.json();
-    const latest = String(rel.tag_name || '').replace(/^v/, '');
-    updateReleaseUrl = rel.html_url || updateReleaseUrl;
-    const current = await getCurrentVersion();
-    if (latest && compareVersions(latest, current) > 0) showUpdateBanner('available', latest);
-    return { latest, current };
-  } catch {
-    return null; // нет сети или API недоступен — молча пропускаем
+    const result = await window.rdpManager.updates.install();
+    if (!result.ok && !result.cancelled) toast(result.message || 'Не удалось установить обновление.', true);
+  } catch (error) { toast(`Не удалось установить обновление: ${error.message}`, true); }
+}
+
+function renderUpdateState(update) {
+  if (!update?.supported) return;
+  const status = $('updateStatus');
+  if (update.phase === 'checking') status.textContent = 'Проверяю…';
+  else if (update.phase === 'current') status.textContent = `У вас последняя версия (v${update.currentVersion})`;
+  else if (update.phase === 'downloading') {
+    status.textContent = `Загрузка версии ${update.version || ''}: ${update.progress || 0}%`;
+    showUpdateBanner('downloading', update.version, update.progress);
+  } else if (update.phase === 'ready') {
+    status.textContent = `Версия ${update.version} готова к установке`;
+    showUpdateBanner('ready', update.version);
+  } else if (update.phase === 'error') {
+    status.textContent = `Не удалось обновить: ${update.error}`;
+    showUpdateBanner('error', '', update.error);
   }
 }
 
-/** События от встроенного автообновления (только в собранном приложении) */
 if (window.rdpManager?.updates) {
-  window.rdpManager.updates.onAvailable((v) => { if (v) showUpdateBanner('downloading', v); });
-  window.rdpManager.updates.onDownloaded((v) => { if (v) showUpdateBanner('ready', v); toast(`Версия ${v} загружена и готова к установке`); });
+  window.rdpManager.updates.onState(renderUpdateState);
+  window.rdpManager.updates.state().then(renderUpdateState).catch(() => {});
 }
 
 $('btnCheckUpdates').addEventListener('click', async () => {
   const status = $('updateStatus');
   status.textContent = 'Проверяю…';
-  const current = await getCurrentVersion();
   try {
-    // В собранном приложении спрашиваем electron-updater, иначе — GitHub API
-    const r = await window.rdpManager?.updates?.check?.();
-    if (r && r.packaged) {
-      if (r.error) throw new Error(r.error);
-      if (r.version && compareVersions(r.version, current) > 0) status.textContent = `Доступна версия ${r.version} — идёт загрузка…`;
-      else status.textContent = `У вас последняя версия (v${current})`;
-      checkForUpdatesViaGitHub();
-      return;
-    }
-    const gh = await checkForUpdatesViaGitHub();
-    status.textContent = gh && gh.latest && compareVersions(gh.latest, current) > 0
-      ? `Доступна версия ${gh.latest}`
+    const result = await window.rdpManager?.updates?.check?.();
+    if (result?.supported) { renderUpdateState(result); return; }
+    const res = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const release = await res.json();
+    const current = await getCurrentVersion();
+    const latest = String(release.tag_name || '').replace(/^v/, '');
+    status.textContent = latest && compareVersions(latest, current) > 0
+      ? `Доступна версия ${latest}. Откройте страницу релиза.`
       : `У вас последняя версия (v${current})`;
-  } catch (err) {
-    status.textContent = 'Не удалось проверить: ' + err.message;
-  }
+    if (latest && compareVersions(latest, current) > 0) showUpdateBanner('error', '', 'автоустановка недоступна в этом режиме');
+  } catch (error) { status.textContent = 'Не удалось проверить: ' + error.message; }
 });
 
-// Фоновая проверка при старте
-getCurrentVersion().then(checkForUpdatesViaGitHub);
+getCurrentVersion();
 
 /* ================= Автовход по сохранённой сессии ================= */
 (async function restoreSession() {

@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
+const { createUpdateController } = require('./update-controller');
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -18,14 +19,12 @@ let mainWindow = null;
 let serverManagerWindow = null;
 let serverManagerTray = null;
 let allowServerManagerQuit = false;
-let serverManagerUpdateTimer = null;
 const serverManagerMode = process.argv.includes('--server-manager');
 const serverManagerStartInTray = process.argv.includes('--server-manager-tray');
 const SERVER_SERVICE_NAME = 'RDPManagerServer';
 const GH_REPO = 'ignatus4405-glitch/RDP_manager';
 const GH_RELEASES_LATEST = `https://api.github.com/repos/${GH_REPO}/releases/latest`;
 const RELEASE_PAGE = `https://github.com/${GH_REPO}/releases/latest`;
-const SERVER_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const hasServerManagerLock = !serverManagerMode || app.requestSingleInstanceLock();
 if (!hasServerManagerLock) app.quit();
 else if (serverManagerMode) app.on('second-instance', () => { app.whenReady().then(showServerManagerWindow); });
@@ -310,24 +309,20 @@ function launchRustDesk(address, name) {
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // раз в 6 часов
 let updateTimer = null;
 
-function sendToWindow(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
-  }
-}
+let updateController;
 
 function initAutoUpdates() {
-  // Менеджер сервера только проверяет релизы: автоустановка не должна останавливать службу без подтверждения.
-  // В dev-режиме (app не собран в .exe/.AppImage) каждый запуск — запуск свежего кода.
-  if (serverManagerMode || !app.isPackaged || !autoUpdater) return;
-
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on('update-available', (info) => sendToWindow('update-available', info?.version));
-  autoUpdater.on('update-downloaded', (info) => sendToWindow('update-downloaded', info?.version));
-  autoUpdater.on('error', (err) => sendToWindow('update-error', String(err?.message || err)));
-
-  const check = () => autoUpdater.checkForUpdates().catch((err) => console.warn('Проверка обновлений не удалась:', err?.message || err));
+  updateController = createUpdateController({
+    updater: autoUpdater,
+    supported: app.isPackaged && (process.platform === 'win32' || (process.platform === 'linux' && Boolean(process.env.APPIMAGE))),
+    currentVersion: app.getVersion(),
+    onChange: (state) => {
+      for (const window of [mainWindow, serverManagerWindow]) {
+        if (window && !window.isDestroyed()) window.webContents.send('update-state', state);
+      }
+    },
+  });
+  const check = () => updateController.check();
   check();
   updateTimer = setInterval(check, UPDATE_CHECK_INTERVAL_MS);
 }
@@ -338,17 +333,19 @@ ipcMain.handle('app-version', () => app.getVersion());
 /* Клипборд главного процесса: надёжно работает без разрешений renderer'а */
 ipcMain.handle('clipboard-read', () => clipboard.readText());
 ipcMain.handle('clipboard-write', (_event, text) => { clipboard.writeText(String(text ?? '')); return true; });
-ipcMain.handle('update-check', async () => {
-  if (!app.isPackaged || !autoUpdater) return { packaged: false };
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    return { packaged: true, version: result?.updateInfo?.version || null };
-  } catch (err) {
-    return { packaged: true, error: String(err?.message || err) };
-  }
-});
-ipcMain.handle('update-install', () => {
-  if (app.isPackaged && autoUpdater) autoUpdater.quitAndInstall();
+ipcMain.handle('update-state', () => updateController.getState());
+ipcMain.handle('update-check', () => updateController.check());
+ipcMain.handle('update-install', async () => {
+  if (updateController.getState().phase !== 'ready') return { ok: false, message: 'Обновление ещё не загружено.' };
+  const { response } = await dialog.showMessageBox(serverManagerWindow || mainWindow, {
+    type: 'question', title: 'Установка обновления',
+    message: 'Установить обновление сейчас?',
+    detail: 'Приложение закроется. При обновлении сервера служба будет временно остановлена. Сохраните работу и закройте другие окна RDP Manager.',
+    buttons: ['Установить', 'Отмена'], defaultId: 1, cancelId: 1, noLink: true,
+  });
+  if (response !== 0) return { ok: false, cancelled: true };
+  allowServerManagerQuit = true;
+  return { ok: updateController.install() };
 });
 ipcMain.handle('open-external', (event, url) => {
   if (/^https?:\/\//i.test(String(url || ''))) return shell.openExternal(url);
@@ -383,21 +380,12 @@ ipcMain.handle('server-manager-update-check', async () => {
 });
 ipcMain.handle('server-manager-open-release', (_event, url) => openServerRelease(url));
 
-function initServerManagerUpdates() {
-  const check = async () => {
-    try { sendServerManagerUpdate(await checkServerManagerUpdates()); }
-    catch (error) { sendServerManagerUpdate({ current: getManagedServerVersion(), latest: null, available: false, error: error.message }); }
-  };
-  check();
-  serverManagerUpdateTimer = setInterval(check, SERVER_UPDATE_CHECK_INTERVAL_MS);
-}
-
 app.whenReady().then(() => {
   if (!hasServerManagerLock) return;
   if (serverManagerMode) {
     createServerManagerWindow();
     createServerManagerTray();
-    initServerManagerUpdates();
+    initAutoUpdates();
   } else {
     createWindow();
     initAutoUpdates();
@@ -418,6 +406,5 @@ app.on('before-quit', () => {
 
 app.on('window-all-closed', () => {
   if (updateTimer) clearInterval(updateTimer);
-  if (serverManagerUpdateTimer) clearInterval(serverManagerUpdateTimer);
   if (process.platform !== 'darwin') app.quit();
 });

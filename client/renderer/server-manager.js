@@ -90,26 +90,28 @@ async function runAction(action) {
   }
 }
 
-async function checkUpdates() {
-  $('updateMessage').textContent = 'Проверяю GitHub Releases…';
-  $('btnCheckUpdates').disabled = true;
-  $('btnRelease').classList.add('hidden');
-  try {
-    const result = await server.checkUpdates();
-    if (result.available) {
-      $('updateMessage').textContent = `Доступна версия v${result.latest}; установлена v${result.current}.`;
-      $('btnRelease').classList.remove('hidden');
-      $('btnRelease').onclick = () => server.openRelease(result.releaseUrl);
-    } else {
-      $('updateMessage').textContent = result.latest
-        ? `Установлена последняя версия v${result.current}.`
-        : `Сейчас установлена версия v${result.current}.`;
-    }
-  } catch (error) {
-    $('updateMessage').textContent = `Не удалось проверить обновления: ${error.message}`;
-  } finally {
-    $('btnCheckUpdates').disabled = false;
+function renderUpdateState(update) {
+  const install = $('btnInstallUpdate');
+  const release = $('btnRelease');
+  install.classList.toggle('hidden', update?.phase !== 'ready');
+  release.classList.toggle('hidden', update?.phase !== 'error' && update?.supported !== false);
+  if (!update?.supported) {
+    $('updateMessage').textContent = 'Автоматическое обновление доступно только в установленной версии.';
+    return;
   }
+  const version = update.version || '';
+  if (update.phase === 'checking') $('updateMessage').textContent = 'Проверяю обновления…';
+  else if (update.phase === 'current') $('updateMessage').textContent = `Установлена последняя версия v${update.currentVersion}.`;
+  else if (update.phase === 'downloading') $('updateMessage').textContent = `Загрузка версии ${version}: ${update.progress || 0}%.`;
+  else if (update.phase === 'ready') $('updateMessage').textContent = `Версия ${version} загружена и готова к установке.`;
+  else if (update.phase === 'error') $('updateMessage').textContent = `Ошибка обновления: ${update.error}`;
+}
+
+async function checkUpdates() {
+  $('btnCheckUpdates').disabled = true;
+  try { renderUpdateState(await window.rdpManager.updates.check()); }
+  catch (error) { $('updateMessage').textContent = `Не удалось проверить обновления: ${error.message}`; }
+  finally { $('btnCheckUpdates').disabled = false; }
 }
 
 $('btnStart').addEventListener('click', () => runAction('start'));
@@ -123,20 +125,20 @@ $('btnPanel').addEventListener('click', async () => {
 });
 $('btnCheckUpdates').addEventListener('click', checkUpdates);
 $('btnRelease').addEventListener('click', () => server.openRelease());
+$('btnInstallUpdate').addEventListener('click', async () => {
+  try {
+    const result = await window.rdpManager.updates.install();
+    if (!result.ok && !result.cancelled) toast(result.message || 'Не удалось установить обновление.');
+  } catch (error) { toast(error.message); }
+});
 $('btnRefreshLogs').addEventListener('click', refreshLogs);
 $('btnLogFolder').addEventListener('click', async () => {
   try { await server.openLogFolder(); }
   catch (error) { toast(error.message); }
 });
 
-server.onUpdateResult((result) => {
-  if (result && result.error) $('updateMessage').textContent = `Не удалось проверить обновления: ${result.error}`;
-  else if (result && result.available) {
-    $('updateMessage').textContent = `Доступна версия v${result.latest}; установлена v${result.current}.`;
-    $('btnRelease').classList.remove('hidden');
-    $('btnRelease').onclick = () => server.openRelease(result.releaseUrl);
-  }
-});
+window.rdpManager.updates.onState(renderUpdateState);
+window.rdpManager.updates.state().then(renderUpdateState).catch(() => {});
 server.onToast((message) => toast(message));
 
 (async function start() {
