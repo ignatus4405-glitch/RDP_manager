@@ -15,16 +15,18 @@ ${StrStr}
 !define RDP_LEGACY_SERVER "$PROGRAMFILES64\RDP Manager Server"
 !define RDP_SERVER_PAYLOAD "${BUILD_RESOURCES_DIR}\server-payload"
 
+Var RdpDataDirectory
+!ifndef BUILD_UNINSTALLER
 Var RdpInstallClient
 Var RdpInstallServer
 Var RdpRadioClient
 Var RdpRadioServer
 Var RdpRadioBoth
 Var RdpComponentsDialog
-Var RdpDataDirectory
 Var RdpPreviousDataDirectory
 Var RdpDataDirectoryInput
 Var RdpBrowseDataButton
+!endif
 
 !macro customInit
   ; Сохраняем выбор компонентов. Для обновления со старых отдельных установщиков определяем их по файлам.
