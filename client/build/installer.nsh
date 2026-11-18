@@ -41,7 +41,9 @@ Var RdpComponentsDialog
   ${EndIf}
 !macroend
 
-!macro customPageAfterChangeDir
+!macro customHeader
+  ; Этот hook вызывается после assistedInstaller.nsh, чтобы страница была зарегистрирована
+  ; после выбора папки установки и до начала копирования файлов.
   Page custom RdpComponentsPageCreate RdpComponentsPageLeave
 !macroend
 
