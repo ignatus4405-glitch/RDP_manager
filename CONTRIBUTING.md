@@ -9,11 +9,11 @@
 npm run server   # сервер на http://0.0.0.0:8720 (веб-панель: /, веб-клиент: /app/)
 npm run client   # Electron-клиент (в sandbox без доступа к github.com бинарник Electron не скачается — см. AGENTS.md)
 npm run check    # синтаксическая проверка всех JS
-npm test         # смоук-тесты сервера
+npm test         # тесты сервера и клиентских utilities
 ```
 
 ## Conventional Commits — ОБЯЗАТЕЛЬНО
-Версионирование (release-please) и changelog строятся из сообщений коммитов:
+Используйте Conventional Commits для истории и определения объёма релиза. Версии и `CHANGELOG.md` готовятся вручную отдельным release PR: workflow Release Please в репозитории не имеет прав создать PR.
 
 | Префикс | Пример | Влияние на версию |
 |---------|--------|-------------------|
@@ -24,31 +24,28 @@ npm test         # смоук-тесты сервера
 
 Scopes: `server`, `client`, `ci`, `docs` — придерживаться существующих.
 
-## Как выходит релиз (автоматически)
-1. Коммиты попадают в `main` (через PR).
-2. **release-please** (`.github/workflows/release.yml`) открывает/обновляет **Release PR**: bump версий в `package.json` (root, `client`, `server`) и `CHANGELOG.md`.
-3. Мерж Release PR → создаётся тег `vX.Y.Z` и GitHub Release.
-4. Тег запускает **Build** (`.github/workflows/build.yml`): Windows NSIS + Linux AppImage собираются, генерируются `latest(-linux).yml`, всё это публикуется в тот же Release (softprops/action-gh-release).
-5. Клиенты на предыдущей версии при старте / раз в 6 ч видят баннер «Доступна новая версия…»; в собранном приложении обновление скачивается тихо и ставится по кнопке или при выходе.
+## Как выходит релиз (вручную)
+1. После слияния обычных изменений в `main` подготовьте отдельный release PR: синхронно обновите версии в root/client/server `package.json`, `package-lock.json`, release manifest и `CHANGELOG.md` (например, запустите `npm install` после bump версий).
+2. Дождитесь зелёных CI/Build-проверок и влейте release PR.
+3. Вручную создайте и отправьте тег `vX.Y.Z` на merge-коммит release PR. Не рассчитывайте на `.github/workflows/release.yml`: workflow настроен, но `GITHUB_TOKEN` в этом репозитории не имеет прав открыть PR.
+4. Тег запускает **Build** (`.github/workflows/build.yml`): публикуются единый Windows NSIS, Linux AppImage, Linux server tar.gz и `latest(-linux).yml`.
+5. Проверьте assets командой `gh release view vX.Y.Z`. Клиенты на предыдущей версии при старте / раз в 6 ч проверяют обновления; приложение загружает клиентский установщик автоматически. Server Manager показывает ссылку на GitHub Release, где пользователь вручную запускает установщик и выбирает серверный компонент.
 
-Ручной релиз (если автоматика недоступна):
+После мержа подставьте реальную версию и SHA merge-коммита release PR:
 ```bash
-# 1. Поднять версии синхронно (root, client, server) и lockfile:
-npm version 1.2.0 --no-git-tag-version
-npm version 1.2.0 --workspace client --no-git-tag-version
-npm version 1.2.0 --workspace server --no-git-tag-version
-npm install               # синхронизирует package-lock.json
-git commit -am "chore: release v1.2.0" && git push
-# 2. Тег запускает сборку и публикацию:
-git tag v1.2.0 && git push origin v1.2.0
+TAG=vX.Y.Z
+RELEASE_COMMIT=MERGE_COMMIT_SHA
+git tag "$TAG" "$RELEASE_COMMIT"
+git push origin "$TAG"
+gh release view "$TAG"
 ```
 
 ## Приватный репозиторий
 - `electron-updater` и кнопка «Установить обновление» не смогут анонимно скачать релиз из приватного репозитория: либо сделайте репозиторий публичным (тогда Releases API и установщики доступны всем), либо выдайте клиентам токен с правом `repo:releases` и настройте скачивание через свой механизм. Бандл и «Узнать о новой версии» через Releases API анонимно из приватного репо не работают (404/403) — баннер просто не появится, приложение продолжит работать.
 
 ## Правила для агентов/контрибьюторов
-1. **Каждое изменение документируйте**: запись в `CHANGELOG.md` (или пишите conventional-commit — release-please добавит её сам) и, если менялось поведение/архитектура, — правку `AGENTS.md` / `README.md`.
-2. Не правьте вручную версии в `package.json` при обычных `feat/fix`-коммитах — это делает release-please. Вручную версии поднимают только при подготовке `chore: release` или вне релизного цикла.
+1. **Документируйте заметные изменения** записью в `CHANGELOG.md`; при изменении поведения/архитектуры обновляйте `AGENTS.md` / `README.md`.
+2. Не меняйте версии в обычных `feat/fix` PR. Bump root/client/server, release manifest и CHANGELOG делается синхронно в отдельном release PR.
 3. `server/data/` никогда не коммитится (там живая БД и `secret.key`).
 4. Перед пушем: `npm run check && npm test`.
 5. Не добавляйте inline `<script>` и `on*-атрибуты` в `client/renderer/index.html` — CSP запрещает их.

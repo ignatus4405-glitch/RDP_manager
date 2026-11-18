@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RDP Manager Server — Управление</title>
+<link rel="stylesheet" href="server-manager.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-icon">🖥️</div>
+    <div class="brand-text"><h1>RDP Manager Server</h1><p>Управление службой Windows</p></div>
+    <div class="version" id="versionLabel">v—</div>
+  </header>
+
+  <main>
+    <section class="card status-card">
+      <div class="section-title"><div><h2>Состояние службы</h2><p id="statusDetails">Проверяю состояние…</p></div><span id="statusBadge" class="badge pending">Проверка</span></div>
+      <div class="actions">
+        <button id="btnStart" class="primary">Запустить</button>
+        <button id="btnStop" class="danger">Остановить</button>
+        <button id="btnRestart" class="secondary">Перезапустить</button>
+        <button id="btnPanel" class="secondary">Открыть веб-панель</button>
+      </div>
+      <p class="hint">Служба запускается вместе с Windows. При сбое Windows автоматически попробует перезапустить её.</p>
+    </section>
+
+    <section class="card update-card">
+      <div class="section-title"><div><h2>Обновления</h2><p id="updateMessage">Проверка обновлений сервера…</p></div><span class="update-mark">↻</span></div>
+      <div class="actions">
+        <button id="btnCheckUpdates" class="secondary">Проверить обновления</button>
+        <button id="btnRelease" class="primary hidden">Открыть релиз</button>
+      </div>
+      <p class="hint">Для обновления скачайте единый установщик и выберите «Серверная служба» или «Клиент и сервер».</p>
+    </section>
+
+    <section class="card logs-card">
+      <div class="section-title log-heading"><div><h2>Журнал службы</h2><p id="logInfo">Файл server.log</p></div><div class="log-actions"><button id="btnRefreshLogs" class="secondary small">Обновить</button><button id="btnLogFolder" class="secondary small">Папка логов</button></div></div>
+      <pre id="logOutput" aria-live="polite">Ожидание журнала…</pre>
+    </section>
+  </main>
+
+  <footer><span id="footerHint">Закрытие окна сворачивает управление в системный трей.</span><span id="toast" role="status"></span></footer>
+  <script src="server-manager.js"></script>
+</body>
+</html>

@@ -1,21 +1,36 @@
 # Установщики RDP Manager Server
 
-Сервер распространяется в виде **однофайлового нативного исполняемого файла** (SEA — Single Executable Application Node.js: внутри бинарника скомпилированный бандл сервера, зависимости и сам рантайм Node; наружу нужен только папка `web/`). База данных (`data/`) создаётся рядом с исполняемым файлом при первом запуске.
+## Windows — единый `RDPManager-Setup-<версия>.exe`
 
-## Windows → `RDPManager-Server-Setup-<версия>.exe`
+Отдельный Windows-установщик сервера больше не выпускается. Сервер входит в общий NSIS-установщик клиента; при запуске от администратора выберите один вариант:
 
-NSIS-установщик (`windows/installer.nsi`):
+1. **Только десктоп-клиент**.
+2. **Серверная служба + графическое управление**.
+3. **Клиент и сервер**.
 
-- ставит в `C:\Program Files\RDP Manager Server\` (бинарь + `web/`);
-- создаёт `data\` рядом (под системными правами);
-- регистрирует автозапуск **от SYSTEM при старте Windows** (Планировщик заданий, задача «RDP Manager Server») и сразу запускает сервер;
-- открывает входящий **TCP 8720** в брандмауэре Windows;
-- добавляет ярлыки «Панель сервера» и «Удалить…» в меню Пуск, запись в «Установка и удаление программ»;
-- деинсталляция спрашивает, удалять ли базу данных (по умолчанию — оставить).
+Выбор компонентного экрана сохраняется для следующих обновлений. Установка сервера:
 
-> Права администратора требуются. Сервер слушает `0.0.0.0:8720`, доступен по сети.
+- устанавливает SEA-бинарь и веб-панель в подпапку `server` рядом с Electron-приложением;
+- регистрирует WinSW-службу `RDPManagerServer` (учётная запись `LocalSystem`), автоматический запуск при старте Windows и перезапуск после ошибки;
+- создаёт правило входящего брандмауэра для TCP 8720 и запускает службу;
+- хранит базу/секрет в `%ProgramData%\RDP Manager Server\data`, журнал — в `%ProgramData%\RDP Manager Server\logs\server.log` (ротация до 5 файлов); stdout/stderr WinSW также ротируются;
+- добавляет ярлык **«Управление сервером»**: окно показывает статус и лог, даёт управлять службой (с запросом UAC), открывать веб-панель и проверять GitHub Releases; закрытие окна скрывает его в системный трей;
+- при переходе со старого отдельного установщика останавливает его задачу Планировщика, копирует БД и ключ из `C:\Program Files\RDP Manager Server\data` в `%ProgramData%` (если там ещё нет базы) и удаляет старые исполняемые файлы; при выборе «только клиент» старая служба также снимается, а данные сохраняются для возможной последующей установки сервера.
 
-## Linux → `RDPManager-Server-<версия>-linux-x64.tar.gz`
+Обычному пользователю выдаётся право чтения каталога логов, чтобы GUI мог показывать журнал. Каталог базы остаётся доступен только системе и администраторам. При обычном удалении служба/ярлыки/правило брандмауэра удаляются, база и логи сохраняются; установщик спрашивает перед их удалением.
+
+Сборка Windows выполняется в job клиента `.github/workflows/build.yml`:
+
+```powershell
+npm ci
+npm run build:sea --workspace server
+npm run stage:windows-server --workspace client
+npm run dist --workspace client
+```
+
+Скрипт `client/scripts/stage-windows-server.js` скачивает WinSW **v2.13.0** с официального GitHub Release, проверяет закреплённый SHA-256 и кладёт комплект в `client/build/server-payload/`. NSIS-страница и действия компонентов описаны в `client/build/installer.nsh`; сервис — в `server/installer/windows/RDPManagerServer.xml`. Сборка требует Windows: SEA нужно собирать под целевую ОС.
+
+## Linux — `RDPManager-Server-<версия>-linux-x64.tar.gz`
 
 ```bash
 tar -xzf RDPManager-Server-<версия>-linux-x64.tar.gz
@@ -32,12 +47,11 @@ sudo bash install.sh
 Удаление без потери БД: `sudo bash uninstall.sh`; полное удаление (с БД): `sudo bash uninstall.sh --purge`.
 > Если нужен другой порт: `sudo systemctl edit rdp-manager-server` → `[Service]` → `Environment=RDP_MANAGER_PORT=9000`, затем `daemon-reload && restart`.
 
-## Сборка вручную (из репозитория)
+## Общая сборка SEA
 
 ```bash
 npm ci
-npm run build:sea --workspace server      # esbuild → SEA (тот же рантайм, что на runner'е)
-# Дальше staging: см. job build-server в .github/workflows/build.yml
+npm run build:sea --workspace server
 ```
 
-На CI для Windows установщик собирается через `choco install nsis` и `makensis /DVERSION=<версия> installer.nsi`.
+`esbuild` объединяет исходники и зависимости в SEA-бинарь. Для Windows и Linux бинарники собираются на соответствующих runner'ах GitHub Actions. Windows-пayload включается в общий Electron NSIS-инсталлятор; Linux-пакет остаётся отдельным tar.gz с systemd-скриптами.

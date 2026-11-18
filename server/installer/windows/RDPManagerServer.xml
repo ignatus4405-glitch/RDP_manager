@@ -1,0 +1,21 @@
+<service>
+  <id>RDPManagerServer</id>
+  <name>RDP Manager Server</name>
+  <description>Служба RDP Manager: REST API, база подключений, документация и RDP-шлюз.</description>
+  <executable>%BASE%\rdp-manager-server.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <env name="RDP_MANAGER_HOME" value="%BASE%" />
+  <env name="RDP_MANAGER_DATA" value="%ProgramData%\RDP Manager Server\data" />
+  <env name="RDP_MANAGER_LOG_DIR" value="%ProgramData%\RDP Manager Server\logs" />
+  <env name="RDP_MANAGER_HOST" value="0.0.0.0" />
+  <env name="RDP_MANAGER_PORT" value="8720" />
+  <logpath>%ProgramData%\RDP Manager Server\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>20sec</stoptimeout>
+</service>

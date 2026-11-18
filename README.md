@@ -10,8 +10,8 @@
 
 | Часть | Что это | Где запускается |
 |-------|---------|-----------------|
-| **Сервер** (`server/`) | Отдельная программа: база данных всех подключений, документов и учётных записей. REST API + SQLite + встроенная веб-панель администратора | Любой компьютер/сервер в локальной сети (Windows, Linux) |
-| **Десктоп-клиент** (`client/`) | Программа на компьютере сотрудника: вход под своей учётной записью, поиск по базе, запуск RDP / AnyDesk / RustDesk в один клик, чтение документации | Компьютеры сотрудников и администраторов |
+| **Сервер** (`server/`) | REST API + SQLite + веб-панель администратора; в Windows — настоящая служба с отдельным GUI-управлением и треем, в Linux — systemd | Сервер в локальной сети (Windows, Linux) |
+| **Десктоп-клиент** (`client/`) | Программа сотрудника: вход под своей учётной записью, поиск по базе, запуск RDP / AnyDesk / RustDesk в один клик, чтение документации | Компьютеры сотрудников и администраторов |
 
 ## Структура репозитория
 
@@ -26,7 +26,7 @@ RDP_manager/
 │   │   └── rdp-gateway.js  # RDCleanPath-шлюз (WebSocket /ws/rdp → TCP/TLS → RDP), JWT + allowlist по БД
 │   ├── web/index.html      # Встроенная веб-панель администратора (создание админов и пр.)
 │   ├── scripts/build-sea.js  # Однофайловый SEA-бинарник сервера (esbuild + postject)
-│   ├── installer/          # Установщики сервера: windows/installer.nsi, linux/install.sh + systemd-юнит
+│   ├── installer/          # WinSW-конфигурация Windows-службы; Linux install.sh + systemd-юнит
 │   └── data/               # Создаётся при первом запуске: rdp-manager.db, secret.key (в .gitignore)
 ├── client/                 # Десктоп-клиент (Electron)
 │   ├── main.js             # Главный процесс: окно + mstsc / внешний запуск AnyDesk / RustDesk
@@ -46,20 +46,21 @@ RDP_manager/
 | Workflow | Когда запускается | Что делает |
 |----------|-------------------|------------|
 | **CI** (`ci.yml`) | каждый push (любая ветка) и PR | `node --check` всех JS, смоук-тесты сервера, проверка electron-builder |
-| **Build** (`build.yml`) | любой push (ветки и теги), PR в `main`, вручную | сборка установщиков: клиент (**Windows NSIS** / **Linux AppImage**) и сервер (**Windows NSIS** / **Linux tar.gz**); генерация `latest(-linux).yml`; на теге `v*` — публикация в GitHub Release (softprops/action-gh-release) |
-| **Release Please** (`release.yml`) | push в `main` | автоматический Release PR с bump версии и CHANGELOG по Conventional Commits; мерж создаёт тег и релиз |
+| **Build** (`build.yml`) | любой push (ветки и теги), PR в `main`, вручную | единый компонентный установщик (**Windows NSIS: клиент / Windows-служба / оба**), клиент (**Linux AppImage**) и сервер (**Linux tar.gz + systemd**); генерация `latest(-linux).yml`; на теге `v*` — публикация в GitHub Release |
+| **Release Please** (`release.yml`) | push в `main` | workflow оставлен в репозитории, но `GITHUB_TOKEN` не имеет прав создать PR; версию и CHANGELOG выпускают вручную через release PR |
 
-**Как выйти новая версия (полностью автоматически):**
-1. `feat:`/`fix:`-коммиты → в `main`;
-2. release-please сам поднимет версию (например, 1.1.0 → 1.2.0) и changelog;
-3. мерж Release PR → тег `v1.3.5` → Build собирает и публикует установщики;
-4. установленные клиенты при старте (и раз в 6 ч) видят баннер «Доступна новая версия…»; обновление тихо скачивается и ставится по кнопке «Установить и перезапустить» или при выходе. В Профиле всегда есть «Проверить обновления» и номер версии.
+**Релизный процесс (вручную):**
+1. После слияния изменений подготовьте отдельный PR: синхронно обновите версии root/client/server, `package-lock.json`, release manifest и `CHANGELOG.md`.
+2. Дождитесь зелёных CI/Build-проверок и влейте release PR.
+3. Вручную создайте и отправьте тег `vX.Y.Z` на merge-коммит релизного PR; тег запускает Build.
+4. Проверьте публикацию командой `gh release view vX.Y.Z`: Windows installer, Linux AppImage, Linux server tar.gz и `latest*.yml` должны быть в Release.
+5. Установленные клиенты проверяют/загружают обновления; Server Manager открывает страницу релиза, откуда пользователь запускает единый установщик с нужным компонентом.
 
 Текущие версии пакетов: `1.3.5`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
 
 ## Требования
 
-- **Node.js ≥ 22.5** на сервере (используется встроенный `node:sqlite`, внешние нативные модули не нужны).
+- **Node.js ≥ 22.5** нужен только для запуска сервера из исходников; готовый SEA-сервер уже содержит Node.js и `node:sqlite`.
 - На **клиентском** компьютере:
   - Windows: `mstsc.exe` (встроен), установленные AnyDesk и/или RustDesk;
   - Linux: `xfreerdp3`/`xfreerdp` или `remmina` для RDP, `anydesk`, `rustdesk` в `PATH`;
@@ -68,16 +69,17 @@ RDP_manager/
 
 ## Установка из готовых установщиков (рекомендуется)
 
-В каждом GitHub Release лежат **два отдельных продукта** (и клиент, и сервер):
+Windows-клиент и Windows-сервер входят **в один установщик**; Linux-пакеты остаются отдельными:
 
 | Файл | Что | Куда ставится |
 |------|-----|----------------|
-| `RDPManager-Setup-<версия>.exe` | десктоп-клиент (Windows, NSIS) | `C:\Program Files\RDP Manager` |
+| `RDPManager-Setup-<версия>.exe` | единый Windows NSIS-установщик: выбор «Клиент» / «Серверная служба + GUI» / «Оба» | `C:\Program Files\RDP Manager` (папка установки выбирается) |
 | `RDPManager-<версия>.AppImage` | десктоп-клиент (Linux) | портативно |
-| `RDPManager-Server-Setup-<версия>.exe` | **сервер** (Windows, NSIS) | `C:\Program Files\RDP Manager Server` |
-| `RDPManager-Server-<версия>-linux-x64.tar.gz` | **сервер** (Linux) | `/opt/rdp-manager-server` |
+| `RDPManager-Server-<версия>-linux-x64.tar.gz` | сервер (Linux) | `/opt/rdp-manager-server` |
 
-**Сервер на Windows**: запустите `RDPManager-Server-Setup-<версия>.exe` от имени администратора — сервер поставится, зарегистрируется в автозапуске от SYSTEM, запустится сразу, порт 8720 будет открыт в брандмауэре. Панель: `http://<IP-сервера>:8720/`.
+**Windows-сервер**: запустите `RDPManager-Setup-<версия>.exe` от имени администратора и выберите «Серверная служба + графическое управление» (или «Клиент и сервер»). Установщик регистрирует настоящую службу `RDPManagerServer` с автоматическим запуском и восстановлением после сбоя, открывает TCP 8720 в брандмауэре и запускает службу. База и секрет хранятся в `%ProgramData%\RDP Manager Server\data`; логи — в `%ProgramData%\RDP Manager Server\logs\server.log` (ротация, окно GUI показывает последние записи). При переходе со старого отдельного Windows-установщика его задача удаляется, а база и ключ копируются в `%ProgramData%`; если выбран «Только десктоп-клиент», старая служба снимается, данные сохраняются для возможной последующей установки сервера.
+
+Из меню «Пуск» откройте **«Управление сервером»**: окно показывает состояние, позволяет запускать/останавливать/перезапускать службу (Windows запросит UAC), открывать веб-панель, читать логи и проверять обновления. При входе пользователя в Windows менеджер запускается свёрнутым в трей; закрытие окна также скрывает его в трей. Из меню трея можно вернуться в GUI, открыть панель и управлять службой. Веб-панель: `http://<IP-сервера>:8720/`.
 
 **Сервер на Linux**:
 ```bash
@@ -87,13 +89,14 @@ sudo bash install.sh
 ```
 Ставит в `/opt/rdp-manager-server`, запускает systemd-юнит `rdp-manager-server` (пользователь `rdp-manager`). Логи: `journalctl -u rdp-manager-server -f`. Удаление: `sudo bash uninstall.sh` (БД сохраняется), полный снос: `sudo bash uninstall.sh --purge`.
 
-**Дальше на каждом клиентском ПК**: поставьте `RDPManager-Setup-<версия>.exe` / AppImage, в окне входа укажите `http://<IP-сервера>:8720`, логин и пароль.
+**Дальше на каждом клиентском ПК**: запустите единый `RDPManager-Setup-<версия>.exe` и выберите «Только десктоп-клиент» (или установите AppImage на Linux), затем укажите адрес сервера, логин и пароль.
 
 ## Быстрый старт: сервер (из исходников)
 
 ```bash
 npm install          # установить зависимости (server + client)
 npm run server       # запустить сервер
+npm run server-manager # dev-GUI службы (управление службой доступно в Windows)
 ```
 
 При первом запуске создаётся база (`server/data/rdp-manager.db`) и учётная запись администратора:
@@ -120,10 +123,10 @@ npm run client       # dev-запуск Electron-окна
 ### Сборка установщика
 
 ```bash
-npm run dist         # client → electron-builder (Windows: NSIS, Linux: AppImage)
+npm run dist         # Windows: единый компонентный NSIS; Linux: AppImage
 ```
 
-Готовые файлы появятся в `client/dist/`.
+Windows-сборка включает серверную службу: перед `npm run dist` на Windows выполните `npm run build:sea --workspace server` и `npm run stage:windows-server --workspace client`. Готовые файлы появятся в `client/dist/`.
 > При `npm install` бинарник Electron скачивается с GitHub Releases — машине сборки нужен доступ к `github.com`. За прокси задайте `NODE_EXTRA_CA_CERTS=/path/to/ca.crt` или `ELECTRON_MIRROR`.
 
 ## Возможности
@@ -195,6 +198,7 @@ DELETE /api/documents/:id                 удалить                    (adm
 | `RDP_MANAGER_PORT` | `8720` | Порт HTTP |
 | `RDP_MANAGER_HOST` | `0.0.0.0` | Адрес привязки |
 | `RDP_MANAGER_DATA` | `server/data` | Каталог БД и ключа токенов |
+| `RDP_MANAGER_LOG_DIR` | выключено | Каталог `server.log` с ротацией; в Windows-службе задан в `%ProgramData%\RDP Manager Server\logs` |
 | `RDP_MANAGER_SECRET` | генерируется в `data/secret.key` | Секрет подписи токенов |
 | `RDP_MANAGER_ADMIN_PASSWORD` | `admin123` | Пароль admin при **первом** запуске |
 | `RDP_MANAGER_TOKEN_TTL` | `43200` (12 ч) | Время жизни токена, сек |
@@ -213,8 +217,8 @@ DELETE /api/documents/:id                 удалить                    (adm
 База — один файл SQLite (`server/data/rdp-manager.db`, WAL-режим). Достаточно регулярно копировать каталог `server/data/` при остановленном сервере, например:
 
 ```bash
-# Windows (Планировщик заданий)
-xcopy C:\RDP_manager\server\data D:\backup\rdp-manager /E /Y
+# Windows (служба RDPManagerServer; данные `%ProgramData%\RDP Manager Server\data`)
+xcopy "%ProgramData%\RDP Manager Server\data" D:\backup\rdp-manager /E /Y
 
 # Linux (cron)
 0 2 * * *  systemctl stop rdp-manager && cp -a /opt/RDP_manager/server/data /backup/ && systemctl start rdp-manager
@@ -225,13 +229,13 @@ xcopy C:\RDP_manager\server\data D:\backup\rdp-manager /E /Y
 ## Обслуживание
 
 - **Сменить пароль admin:** веб-панель → «Сброс пароля», или в клиенте → Пользователи.
-- **Забыть пароль admin полностью:** остановить сервер, удалить `server/data/rdp-manager.db` — при следующем запуске создастся новая БД (все данные будут потеряны!) с admin/admin123. Поэтому регулярно делайте бэкап.
+- **Забыть пароль admin полностью:** остановить сервер, удалить `rdp-manager.db` из каталога `RDP_MANAGER_DATA` (в Windows-службе — `%ProgramData%\RDP Manager Server\data`) — при следующем запуске создастся новая БД (все данные будут потеряны!) с admin/admin123. Поэтому регулярно делайте бэкап.
 - **Обновление приложения:** `git pull && npm install && npm run server`.
 
 ## Документация в репозитории
 
-- `CHANGELOG.md` — история изменений (поддерживается release-please)
-- `CONTRIBUTING.md` — как контрибьютить и как выходит релиз (Conventional Commits, автообновление)
+- `CHANGELOG.md` — история изменений; актуализируется при подготовке релизного PR
+- `CONTRIBUTING.md` — правила контрибьютинга и ручной выпуск релиза (Conventional Commits)
 - `AGENTS.md` — карта проекта и правила для любого агента, продолжающего работу
 
 ## Статус реализации / ограничения
@@ -239,7 +243,7 @@ xcopy C:\RDP_manager\server\data D:\backup\rdp-manager /E /Y
 - Проверено end-to-end: API (авторизация, CRUD подключений/документов/пользователей, поиск, фильтры), запуск сервера, веб-панель и веб-режим клиента — `http://<IP>:8720/app/`. Смоук-тесты сервера зелёные (`npm test`).
 - **Встроенная RDP-сессия**: протокол IronRDP (WASM) покрывает RDP 5–8 + CredSSP/NLA; экзотические конфигурации (RD Gateway, RemoteFX, smartcard) не гарантируются — в этом случае используйте «Во внешнем клиенте». Графическая часть встроенной сессии проверяется только на реальной машине с RDP-узлом; логика шлюза покрыта unit-тестами (`server/test/rdp-gateway.test.js`).
 - Графический интерфейс клиента реализован на Electron; бинарник Electron намеренно не входит в репозиторий (ставится через `npm install`).
-- Автообновление клиента требует опубликованного GitHub Release с установщиками и `latest.yml`; появляется после мержа Release PR (см. выше). В приватном репозитории автообновление не скачает релиз анонимно — см. `CONTRIBUTING.md`.
+- Клиент автоматически проверяет и загружает обновления из GitHub Releases; ручная проверка — в разделе «Профиль». GUI сервера проверяет релизы при запуске, раз в 6 часов и по кнопке «Проверить обновления»; для установки серверной версии откройте релиз и запустите единый установщик, выбрав серверный компонент. В приватном репозитории API/автообновление не скачает релиз анонимно — см. `CONTRIBUTING.md`.
 - RustDesk и AnyDesk запускаются как внешние программы — они должны быть установлены на клиентском ПК.
 - Пароли RDP/AnyDesk/RustDesk не хранятся и не передаются через сервер; пароль для встроенной сессии вводится каждый раз в форме подключения.
 - RDP-шлюз работает через **сервер**, а не напрямую с клиентского ПК: сервер должен маршрутизировать RDP (TCP 3389/3390…) к целевым узлам. Если сервер такой доступ не имеет, используйте внешний клиент.
