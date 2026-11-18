@@ -8,6 +8,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const net = require('net');
+const tls = require('tls');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -24,6 +25,7 @@ const {
   parseRDCleanPathRequest,
   buildRDCleanPathError,
   buildRDCleanPathResponse,
+  performRDPHandshake,
 } = require('../src/rdp-gateway');
 const { db } = require('../src/db');
 const { signToken } = require('../src/auth');
@@ -145,4 +147,25 @@ test('WebSocket upgrade без токена → 401; с токеном → 101',
   server.closeAllConnections?.();
   server.closeIdleConnections?.();
   await new Promise((r) => server.close(r));
+});
+
+test('RDP handshake timeout is removed after TLS establishment', async (t) => {
+  const context = tls.createSecureContext({
+    key: fs.readFileSync(path.join(__dirname, 'fixtures/rdp-test-key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'fixtures/rdp-test-cert.pem')),
+  });
+  let peer;
+  const server = net.createServer((socket) => {
+    socket.once('data', () => {
+      socket.write(Buffer.from([3, 0, 0, 4]));
+      peer = new tls.TLSSocket(socket, { isServer: true, secureContext: context });
+      peer.on('error', () => {});
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { peer?.destroy(); server.close(); });
+  const { tlsSocket } = await performRDPHandshake('127.0.0.1', server.address().port, Buffer.from([1]), 200);
+  t.after(() => tlsSocket.destroy());
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(tlsSocket.destroyed, false);
 });

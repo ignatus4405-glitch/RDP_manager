@@ -114,7 +114,13 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const empRead = await get('/api/connections', empToken);
   assert.equal(empRead.status, 200, 'сотрудник должен видеть подключения');
 
-  // 6. Смена пароля и вход по новому паролю
+  // 6. Неверный текущий пароль не должен выглядеть как истёкшая сессия.
+  const badChange = await post('/api/change-password', { current_password: 'wrong', new_password: 'secret2' }, empToken);
+  assert.equal(badChange.status, 400);
+  assert.equal((await badChange.json()).error, 'Текущий пароль указан неверно');
+  assert.equal((await get('/api/me', empToken)).status, 200);
+
+  // Смена пароля и вход по новому паролю.
   const change = await post('/api/change-password', { current_password: 'secret1', new_password: 'secret2' }, empToken);
   assert.equal(change.status, 200);
   const relogin = await post('/api/login', { username: 'sotrudnik', password: 'secret2' });

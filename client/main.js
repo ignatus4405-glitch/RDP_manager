@@ -3,13 +3,17 @@
  * RDP Manager — главный процесс Electron.
  * Окно приложения + безопасный запуск внешних программ (mstsc / AnyDesk / RustDesk).
  */
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, ClipboardItem, Tray, Menu, nativeImage, Notification } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
+const { createRdpFileWriter } = require('./rdp-file-writer');
+const { createClipboardFileSource } = require('./clipboard-file-source');
+const { createClipboardReceiver } = require('./rdp-clipboard-receiver');
+const { createRichClipboard } = require('./clipboard-rich');
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -21,6 +25,15 @@ let serverManagerTray = null;
 let allowServerManagerQuit = false;
 const serverManagerMode = process.argv.includes('--server-manager');
 const serverManagerStartInTray = process.argv.includes('--server-manager-tray');
+const fileWriter = createRdpFileWriter({
+  choosePath: async (name) => {
+    const result = await dialog.showSaveDialog(mainWindow, { title: 'Сохранить файл из RDP', defaultPath: String(name) });
+    return result.canceled ? null : result.filePath;
+  },
+});
+const clipboardFileSource = createClipboardFileSource({ clipboard });
+const richClipboard = createRichClipboard({ clipboard, ClipboardItem });
+const clipboardReceiver = createClipboardReceiver({ clipboard, ClipboardItem, tempDirectory: app.getPath('temp') });
 const SERVER_SERVICE_NAME = 'RDPManagerServer';
 const GH_REPO = 'ignatus4405-glitch/RDP_manager';
 const GH_RELEASES_LATEST = `https://api.github.com/repos/${GH_REPO}/releases/latest`;
@@ -47,6 +60,7 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.on('closed', () => { mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); });
 }
 
 function createServerManagerWindow() {
@@ -332,7 +346,29 @@ ipcMain.handle('launch-connection', (event, conn) => launchConnection(conn));
 ipcMain.handle('app-version', () => app.getVersion());
 /* Клипборд главного процесса: надёжно работает без разрешений renderer'а */
 ipcMain.handle('clipboard-read', () => clipboard.readText());
-ipcMain.handle('clipboard-write', (_event, text) => { clipboard.writeText(String(text ?? '')); return true; });
+ipcMain.handle('clipboard-write', async (_event, text) => { await clipboard.writeText(String(text ?? '')); return true; });
+function requireClientWindow(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Операция доступна только окну клиента.');
+}
+ipcMain.handle('rdp-clipboard-read-rich', (event) => { requireClientWindow(event); return richClipboard.read(); });
+ipcMain.handle('rdp-clipboard-write-rich', (event, entries) => { requireClientWindow(event); return richClipboard.write(entries); });
+ipcMain.handle('rdp-clipboard-files', (event) => { requireClientWindow(event); return clipboardFileSource.inspect(); });
+ipcMain.handle('rdp-clipboard-file-read', (event, id, offset, size) => { requireClientWindow(event); return clipboardFileSource.read(id, offset, size); });
+ipcMain.handle('rdp-clipboard-files-reset', (event) => { requireClientWindow(event); clipboardFileSource.reset(); });
+ipcMain.handle('rdp-clipboard-receive-begin', (event, files) => { requireClientWindow(event); return clipboardReceiver.begin(files); });
+ipcMain.handle('rdp-clipboard-receive-open', (event, id, index) => { requireClientWindow(event); return clipboardReceiver.open(id, index); });
+ipcMain.handle('rdp-clipboard-receive-write', (event, id, index, data) => { requireClientWindow(event); return clipboardReceiver.write(id, index, data); });
+ipcMain.handle('rdp-clipboard-receive-close', (event, id, index) => { requireClientWindow(event); return clipboardReceiver.close(id, index); });
+ipcMain.handle('rdp-clipboard-receive-commit', (event, id) => { requireClientWindow(event); return clipboardReceiver.commit(id); });
+ipcMain.handle('rdp-clipboard-receive-cancel', (event, id) => { requireClientWindow(event); return clipboardReceiver.cancel(id); });
+ipcMain.handle('rdp-file-begin', (event, name) => {
+  requireClientWindow(event);
+  const safeName = String(name || 'file').split(/[\\/]/).pop().replace(/[\x00-\x1f<>:"|?*]/g, '_') || 'file';
+  return fileWriter.begin(safeName);
+});
+ipcMain.handle('rdp-file-write', (event, id, chunk) => { requireClientWindow(event); return fileWriter.write(id, chunk); });
+ipcMain.handle('rdp-file-finish', (event, id) => { requireClientWindow(event); return fileWriter.finish(id); });
+ipcMain.handle('rdp-file-cancel', (event, id) => { requireClientWindow(event); return fileWriter.cancel(id); });
 ipcMain.handle('update-state', () => updateController.getState());
 ipcMain.handle('update-check', () => updateController.check());
 ipcMain.handle('update-install', async () => {

@@ -57,7 +57,7 @@ router.post('/change-password', requireAuth, (req, res) => {
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user || !verifyPassword(current, user.password_hash)) {
-    return res.status(401).json({ error: 'Текущий пароль указан неверно' });
+    return res.status(400).json({ error: 'Текущий пароль указан неверно' });
   }
   db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = datetime('now') WHERE id = ?`)
     .run(hashPassword(next), user.id);

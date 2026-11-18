@@ -28,6 +28,10 @@
       "preload.js",
       "server-manager-utils.js",
       "update-controller.js",
+      "rdp-file-writer.js",
+      "clipboard-file-source.js",
+      "rdp-clipboard-receiver.js",
+      "clipboard-rich.js",
       "renderer/**",
       "assets/**"
     ],

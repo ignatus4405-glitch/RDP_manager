@@ -235,7 +235,7 @@ function isKnownRdpTarget(host, port) {
 // Network: TCP + X.224 + TLS + Certificate Extraction
 // ────────────────────────────────────────────────────
 
-function performRDPHandshake(host, port, x224Request) {
+function performRDPHandshake(host, port, x224Request, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const tcpSocket = net.createConnection({ host, port }, () => {
       tcpSocket.write(x224Request);
@@ -255,6 +255,10 @@ function performRDPHandshake(host, port, x224Request) {
       const tlsSocket = tls.connect(
         { socket: tcpSocket, servername: host, rejectUnauthorized: false }, // RDP обычно со self-signed сертификатами
         () => {
+          // Тайм-аут нужен только для рукопожатия: установленная RDP-сессия
+          // может простаивать дольше 15 секунд, не закрывайте её как handshake.
+          tcpSocket.setTimeout(0);
+          tlsSocket.setTimeout(0);
           const certChain = extractCertChain(tlsSocket.getPeerCertificate(true));
           resolve({ x224Response: Buffer.from(x224Response), certChain, tlsSocket });
         }
@@ -262,7 +266,7 @@ function performRDPHandshake(host, port, x224Request) {
       tlsSocket.once('error', (err) => reject(new Error(`TLS handshake с ${host}:${port}: ${err.message}`)));
     });
 
-    tcpSocket.setTimeout(15000, () => {
+    tcpSocket.setTimeout(timeoutMs, () => {
       tcpSocket.destroy();
       reject(new Error(`Тайм-аут подключения к ${host}:${port}`));
     });
@@ -378,4 +382,5 @@ module.exports = {
   buildRDCleanPathResponse,
   buildRDCleanPathError,
   extractCertChain,
+  performRDPHandshake,
 };

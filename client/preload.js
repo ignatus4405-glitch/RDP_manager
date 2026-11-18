@@ -17,6 +17,23 @@ contextBridge.exposeInMainWorld('rdpManager', {
   writeClipboard: (text) => ipcRenderer.invoke('clipboard-write', text),
   /** ОС клиента: win32 | linux | darwin */
   platform: process.platform,
+  fileTransfer: {
+    readRich: () => ipcRenderer.invoke('rdp-clipboard-read-rich'),
+    writeRich: (entries) => ipcRenderer.invoke('rdp-clipboard-write-rich', entries),
+    clipboardFiles: () => ipcRenderer.invoke('rdp-clipboard-files'),
+    readClipboardFile: (id, offset, size) => ipcRenderer.invoke('rdp-clipboard-file-read', id, offset, size),
+    resetClipboardFiles: () => ipcRenderer.invoke('rdp-clipboard-files-reset'),
+    receiveBegin: (files) => ipcRenderer.invoke('rdp-clipboard-receive-begin', files),
+    receiveOpen: (id, index) => ipcRenderer.invoke('rdp-clipboard-receive-open', id, index),
+    receiveWrite: (id, index, chunk) => ipcRenderer.invoke('rdp-clipboard-receive-write', id, index, chunk),
+    receiveClose: (id, index) => ipcRenderer.invoke('rdp-clipboard-receive-close', id, index),
+    receiveCommit: (id) => ipcRenderer.invoke('rdp-clipboard-receive-commit', id),
+    receiveCancel: (id) => ipcRenderer.invoke('rdp-clipboard-receive-cancel', id),
+    begin: (name) => ipcRenderer.invoke('rdp-file-begin', name),
+    write: (id, chunk) => ipcRenderer.invoke('rdp-file-write', id, chunk),
+    finish: (id) => ipcRenderer.invoke('rdp-file-finish', id),
+    cancel: (id) => ipcRenderer.invoke('rdp-file-cancel', id),
+  },
   /** Проверка и установка обновлений из GitHub Releases */
   updates: {
     /** Ручная проверка. Возвращает { packaged, version?, error? } — packaged:false в dev-режиме */
