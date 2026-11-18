@@ -59,12 +59,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm run dist --workspace client > /tmp/dist.log 2>&1 || {
-            echo "----- последние строки вывода electron-builder -----"
-            tail -n 40 /tmp/dist.log
+            echo "----- полный вывод electron-builder -----"
+            cat /tmp/dist.log
             echo "----- аннотации для диагностики -----"
-            tail -n 8 /tmp/dist.log | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g' | sed 's/^/::error::/'
+            tail -n 30 /tmp/dist.log | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g' | sed 's/^/::error::/'
             exit 1
           }
+
+      - name: Журнал неудачной сборки Windows/Linux
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-builder-log-${{ matrix.os }}
+          path: /tmp/dist.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Проверка app-update.yml (конфиг автообновления внутри сборки)
         shell: bash
