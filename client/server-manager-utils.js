@@ -14,7 +14,12 @@ const SERVICE_STATE_NAMES = Object.freeze({
 
 function parseServiceStatus(output, exitCode = 0) {
   const text = String(output || '');
-  const stateMatch = text.match(/(?:STATE|СОСТОЯНИЕ)\s*:\s*(\d+)\b/i);
+  // sc.exe uses the Windows OEM code page. Localized field names may be
+  // undecodable as UTF-8, but its numeric state and symbolic name are ASCII.
+  const stateMatch = Number(exitCode) === 0 && (
+    text.match(/(?:STATE|СОСТОЯНИЕ)\s*:\s*(\d+)\b/i) ||
+    text.match(/:\s*([1-7])\s+(?:STOPPED|START_PENDING|STOP_PENDING|RUNNING|CONTINUE_PENDING|PAUSE_PENDING|PAUSED)\b/i)
+  );
   if (stateMatch) {
     const code = Number(stateMatch[1]);
     return { installed: true, state: SERVICE_STATE_NAMES[code] || 'unknown', stateCode: code };
