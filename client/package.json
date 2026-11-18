@@ -27,6 +27,7 @@
       "main.js",
       "preload.js",
       "server-manager-utils.js",
+      "update-controller.js",
       "renderer/**",
       "assets/**"
     ],
