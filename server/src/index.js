@@ -10,6 +10,9 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const { installConsoleFileLogger } = require('./file-logger');
+try { installConsoleFileLogger(); }
+catch (error) { console.warn('Не удалось открыть файл журнала сервера:', error.message); }
 const express = require('express');
 const { seededAdmin, DATA_DIR } = require('./db');
 const { WEB_DIR, CLIENT_RENDERER, CLIENT_ASSETS } = require('./paths');
@@ -70,8 +73,7 @@ server.listen(PORT, HOST, () => {
     console.log('----------------------------------------------');
     console.log('  Создана учётная запись администратора:');
     console.log(`    логин:  ${seededAdmin.username}`);
-    console.log(`    пароль: ${seededAdmin.password}`);
-    console.log('  Смените пароль при первом входе!');
+    console.log('    начальный пароль задан политикой установки; смените его при первом входе.');
   }
   console.log('==============================================');
 });

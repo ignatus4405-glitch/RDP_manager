@@ -30,6 +30,18 @@ contextBridge.exposeInMainWorld('rdpManager', {
     /** Подписка на ошибку проверки обновлений */
     onError: (cb) => bindChannel('update-error', cb),
   },
+  /** Управление локальной службой Windows — доступно только из отдельного окна Server Manager. */
+  server: {
+    status: () => ipcRenderer.invoke('server-manager-status'),
+    action: (action) => ipcRenderer.invoke('server-manager-action', action),
+    logs: () => ipcRenderer.invoke('server-manager-logs'),
+    openLogFolder: () => ipcRenderer.invoke('server-manager-open-log-folder'),
+    openPanel: () => ipcRenderer.invoke('server-manager-open-panel'),
+    checkUpdates: () => ipcRenderer.invoke('server-manager-update-check'),
+    openRelease: (url) => ipcRenderer.invoke('server-manager-open-release', url),
+    onUpdateResult: (cb) => bindChannel('server-manager-update', cb),
+    onToast: (cb) => bindChannel('server-manager-toast', cb),
+  },
 });
 
 function bindChannel(channel, cb) {

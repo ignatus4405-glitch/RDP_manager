@@ -5,3 +5,5 @@ out/
 *.log
 .env
 client/renderer/vendor/
+client/build/server-payload/
+client/build/WinSW-*-x64.exe
