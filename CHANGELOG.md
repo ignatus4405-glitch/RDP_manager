@@ -5,6 +5,43 @@
 Заметные изменения записываются в секцию `Unreleased`; при выпуске отдельный release PR синхронизирует версии и историю изменений.
 Conventional Commits используйте для ясной истории изменений (см. CONTRIBUTING.md).
 
+## [1.5.0](https://github.com/ignatus4405-glitch/RDP_manager/compare/v1.4.7...v1.5.0) (2026-11-19)
+
+
+### Features
+
+* **ci:** автосборка GitHub Actions, автообновление версий и клиента ([53602b7](https://github.com/ignatus4405-glitch/RDP_manager/commit/53602b78d20e6e175b7240c88f679a0220f1e3cb))
+* **client:** встроенная RDP-сессия в окне приложения (IronRDP WASM + RDCleanPath-шлюз) ([360e988](https://github.com/ignatus4405-glitch/RDP_manager/commit/360e988d688a6ba5de3c1acb3a16f4fa0e27acef))
+* **client:** встроенная RDP-сессия в окне приложения (как в Remote Desktop Manager) ([fe062e7](https://github.com/ignatus4405-glitch/RDP_manager/commit/fe062e77608aaa8830485d66d1f45df3abfd9b58))
+* **server:** add Windows service manager and unified installer ([14ef569](https://github.com/ignatus4405-glitch/RDP_manager/commit/14ef569223d7c80871db780843c1fb1e08fcda80))
+* **server:** add Windows service manager and unified installer ([0014eab](https://github.com/ignatus4405-glitch/RDP_manager/commit/0014eabaf690037b61f68ca002959843c4235463))
+* **server:** отдельный установщик серверной части (Windows NSIS / Linux tar.gz) ([eec099a](https://github.com/ignatus4405-glitch/RDP_manager/commit/eec099a126063703621ce4cc40199c7a6928ee87))
+
+
+### Bug Fixes
+
+* **ci:** в релиз и артефакты попадают только готовые установщики сервера ([a2b813d](https://github.com/ignatus4405-glitch/RDP_manager/commit/a2b813dbe934626f07c651dfb70fbb927a1188c9))
+* **ci:** надёжная публикация релиза и смоук-тесты на Windows ([89986e8](https://github.com/ignatus4405-glitch/RDP_manager/commit/89986e86e8a52947d012fb707e2f834f5d30962b))
+* **ci:** надёжный поиск makensis и try/catch в упаковке Windows-установщика сервера ([d9f2441](https://github.com/ignatus4405-glitch/RDP_manager/commit/d9f244152dee213036359158b2589caf3791cd84))
+* **ci:** трёхступенчатый поиск makensis (PATH → choco рекурсивно → прямое скачивание NSIS 3.0.4.1) ([3b9d873](https://github.com/ignatus4405-glitch/RDP_manager/commit/3b9d873d92c24883a62f08139caff435ae0cd4a6))
+* **client:** electron в devDependencies с точной версией — исправление сборки electron-builder ([ef11829](https://github.com/ignatus4405-glitch/RDP_manager/commit/ef11829174b1d6748bafe393b2677d517b486257))
+* **client:** буфер обмена — не терять первую копию (local→remote) ([7fea87c](https://github.com/ignatus4405-glitch/RDP_manager/commit/7fea87c75c1070d5668c53378eb04f680255f028))
+* **client:** буфер обмена и разрешение во встроенном RDP ([6bfa57e](https://github.com/ignatus4405-glitch/RDP_manager/commit/6bfa57e481a16e9814945477a1692e41addb3865))
+* **client:** буфер обмена и разрешение во встроенном RDP ([c18d13c](https://github.com/ignatus4405-glitch/RDP_manager/commit/c18d13cbec47f2baf5800ca1513876bc9e8fcc2c))
+* **client:** встроенный RDP — «Failed to fetch» при подключении ([8f57fdf](https://github.com/ignatus4405-glitch/RDP_manager/commit/8f57fdfbd013b7fcdc16847f856fb80b693ab4ba))
+* **client:** встроенный RDP — больше не 'Failed to fetch' при подключении ([f4153ac](https://github.com/ignatus4405-glitch/RDP_manager/commit/f4153acf57252593f1098f79b66c124453caad2d))
+* **client:** вшит app-update.yml для автообновления; v1.1.1 ([b6465fa](https://github.com/ignatus4405-glitch/RDP_manager/commit/b6465fa4365eeaebbc5c2e7c9076e33b5bee107b))
+* **client:** не терять первую копию буфера в поллинге (local→remote) ([9e47ee3](https://github.com/ignatus4405-glitch/RDP_manager/commit/9e47ee320b3d32c7f75c47c2cfa3d2fda690714f))
+* **client:** передавать JWT в WebSocket-шлюз /ws/rdp ([781c419](https://github.com/ignatus4405-glitch/RDP_manager/commit/781c419a1022df2177502faf9746092312452386))
+* **client:** передавать JWT в WebSocket-шлюз /ws/rdp (ProxyConnect) ([d1351cc](https://github.com/ignatus4405-glitch/RDP_manager/commit/d1351ccb0c4e346bd4db9f1efa430ad74e5709a1))
+* **client:** предполетная проверка версии сервера (встроенный RDP) ([52c1cbb](https://github.com/ignatus4405-glitch/RDP_manager/commit/52c1cbbc56993646e84905e737695200cd499af4))
+* **client:** предполетная проверка версии сервера для встроенного RDP ([a1a9ab0](https://github.com/ignatus4405-glitch/RDP_manager/commit/a1a9ab0ee2d1707c4b90078a6bb8ea8f9e8fec11))
+* **client:** удалена секция publish из electron-builder конфига ([d35cb3d](https://github.com/ignatus4405-glitch/RDP_manager/commit/d35cb3df1103721e82199674cb269a2d4812c424))
+* **installer:** register component selection NSIS page ([2de91ea](https://github.com/ignatus4405-glitch/RDP_manager/commit/2de91eaa1c868bdf1d899be7d309e1feae4370f3))
+* **installer:** use ProgramData environment path in NSIS ([1f99f18](https://github.com/ignatus4405-glitch/RDP_manager/commit/1f99f180d86a81611c861bee841d64f15ecbd88e))
+* **server:** UTF-8 BOM в installer.nsi — русский текст больше не кракозябры ([c4804a5](https://github.com/ignatus4405-glitch/RDP_manager/commit/c4804a54ec29998448dd0c0e31cbfa45c99a1a04))
+* **server:** UTF-8 BOM в NSIS-скрипте — кириллица в установщике ([b06b5fc](https://github.com/ignatus4405-glitch/RDP_manager/commit/b06b5fc0321bdcc7358e87a6306280eb9fdfe4d2))
+
 ## [1.4.7] - 2026-11-16
 
 ### Исправлено
