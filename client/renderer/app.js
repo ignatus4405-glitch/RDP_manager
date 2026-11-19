@@ -386,7 +386,6 @@ function teardownRdpSession() {
   $('rdpFileReceive').disabled = true;
   $('rdpFileSend').classList.remove('hidden');
   $('rdpFileReceive').classList.remove('hidden');
-  $('rdpFileStatus').textContent = '';
   if (s) { try { s.shutdown(); } catch { /* уже завершена */ } }
   $('rdpDisconnectBtn').disabled = true;
 }
@@ -779,7 +778,7 @@ async function startEmbeddedRdp() {
     rdpFileTransfer = window.createRdpFileTransfer({
       getSession: () => rdpSession.session,
       Extension: IronRDP.Extension,
-      onStatus: (message) => { if (isCurrentAttempt()) $('rdpFileStatus').textContent = message; },
+      onStatus: (message) => { if (isCurrentAttempt() && message.startsWith('Ошибка')) toast(message, true); },
       onRemoteFiles: (receiving) => {
         if (!isCurrentAttempt()) return;
         rdpClipboardState.receiving = receiving;
@@ -879,14 +878,14 @@ $('rdpFileInput').addEventListener('change', async (event) => {
     const localText = await rdpReadLocalClipboard();
     rdpFileTransfer.offer(event.target.files);
     rdpClipboardState.suspendedText = localText;
-  } catch (error) { $('rdpFileStatus').textContent = error.message; }
+  } catch (error) { toast(error.message, true); }
   event.target.value = '';
 });
 $('rdpFileReceive').addEventListener('click', async () => {
   const button = $('rdpFileReceive');
   button.disabled = true;
   try { await rdpFileTransfer.download(); }
-  catch (error) { $('rdpFileStatus').textContent = error.message; }
+  catch (error) { toast(error.message, true); }
   finally { button.disabled = !rdpSession.session; }
 });
 
