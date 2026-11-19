@@ -118,3 +118,48 @@ test('virtual clipboard rejects stale in-flight and invalid reads', async () => 
   await assert.rejects(read, /удалённый буфер изменился/i);
   assert.equal(sent.length, 1);
 });
+
+test('virtual clipboard publishes descriptors without downloading file contents', async () => {
+  const callbacks = {};
+  const sent = [];
+  const offers = [];
+  let notify;
+  const finished = new Promise((resolve) => { notify = resolve; });
+  const session = { invokeExtension: (ext) => sent.push(ext) };
+  const transfer = createRdpFileTransfer({
+    getSession: () => session, Extension, onStatus() {}, onClipboardFinished: notify,
+    virtualClipboard: { publish: async (offer) => offers.push(offer), clear: async () => {} },
+  });
+  transfer.setup({ extension: (ext) => { callbacks[ext.name] = ext.value; } });
+  callbacks.files_available_callback([{ name: 'file.txt', size: 3 }], 4);
+  assert.equal(await finished, true);
+  assert.equal(sent.length, 0);
+  assert.equal(offers[0].files[0].name, 'file.txt');
+  const pending = offers[0].read(0, 0, 3);
+  await new Promise((resolve) => setImmediate(resolve));
+  callbacks.file_contents_response_callback({ streamId: sent[0].value.stream_id, data: Buffer.from('abc') });
+  assert.equal(Buffer.from(await pending).toString(), 'abc');
+});
+
+test('virtual clipboard serializes replacement and invalidates old offers', async () => {
+  const callbacks = {};
+  const published = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const session = { invokeExtension() {} };
+  const transfer = createRdpFileTransfer({
+    getSession: () => session, Extension, onStatus() {},
+    virtualClipboard: { publish: async (offer) => { published.push(offer); if (published.length === 1) await gate; }, clear: async () => published.push(null) },
+  });
+  transfer.setup({ extension: (ext) => { callbacks[ext.name] = ext.value; } });
+  callbacks.files_available_callback([{ name: 'old' }], 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  callbacks.files_available_callback([{ name: 'new' }], 2);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(published.map((offer) => offer.files[0].name), ['old', 'new']);
+  await assert.rejects(published[0].read(0, 0, 1), /буфер или сессия изменились/i);
+  transfer.reset();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(published.at(-1), null);
+});

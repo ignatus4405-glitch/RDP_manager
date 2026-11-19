@@ -5,7 +5,7 @@
   const CHUNK_SIZE = 64 * 1024;
   const TIMEOUT_MS = 30000;
 
-  function createRdpFileTransfer({ getSession, Extension, onStatus, onRemoteFiles = () => {}, onClipboardFinished = () => {}, openFile, clipboardReceiver }) {
+  function createRdpFileTransfer({ getSession, Extension, onStatus, onRemoteFiles = () => {}, onClipboardFinished = () => {}, openFile, clipboardReceiver, virtualClipboard }) {
     let localFiles = [];
     let remoteFiles = [];
     let pending = null;
@@ -25,6 +25,9 @@
       remoteRevision++;
       localFiles = [];
       remoteFiles = [];
+      if (virtualClipboard) {
+        clipboardQueue = clipboardQueue.catch(() => {}).then(() => virtualClipboard.clear()).catch(() => {});
+      }
       if (pending) { clearTimeout(pending.timer); pending.reject(new Error('Сессия RDP завершена.')); pending = null; }
     }
     function setup(builder) {
@@ -34,8 +37,28 @@
         remoteRevision++;
         if (pending) { clearTimeout(pending.timer); pending.reject(new Error('Удалённый буфер изменился.')); pending = null; }
         remoteFiles = Array.from(files || []).map((file, index) => ({ ...file, index, clipDataId }));
-        onRemoteFiles(remoteFiles.length > 0 && Boolean(clipboardReceiver));
-        if (remoteFiles.length && clipboardReceiver) {
+        onRemoteFiles(remoteFiles.length > 0 && Boolean(clipboardReceiver || virtualClipboard));
+        if (virtualClipboard) {
+          const revision = remoteRevision;
+          const offer = virtualOffer();
+          // Serialize publication with invalidation: a slow older publish must
+          // never replace the clipboard with stale remote files.
+          clipboardQueue = clipboardQueue.catch(() => {}).then(async () => {
+            if (revision !== remoteRevision) return;
+            if (!offer.files.length) {
+              await virtualClipboard.clear();
+            } else {
+              await virtualClipboard.publish(offer);
+            }
+            if (revision !== remoteRevision) return;
+            await onClipboardFinished(true);
+            status(offer.files.length ? 'Файлы доступны для вставки.' : 'В удалённом буфере нет файлов.');
+          }).catch(async (error) => {
+            if (revision !== remoteRevision) return;
+            await onClipboardFinished(false);
+            status(`Ошибка буфера обмена: ${error.message}`);
+          });
+        } else if (remoteFiles.length && clipboardReceiver) {
           const revision = remoteRevision;
           const selected = remoteFiles.slice();
           status(`Получение ${selected.length} файлов в буфер обмена…`);
@@ -87,7 +110,7 @@
         catch (error) { clearTimeout(timer); pending = null; reject(error); }
       });
     }
-    // A future OS clipboard provider can expose these descriptors immediately
+    // An OS clipboard provider can expose these descriptors immediately
     // and call read only when a destination requests bytes. Each offer is tied
     // to its original clipboard generation; stale handles must never read the
     // newly copied remote files by accident.
