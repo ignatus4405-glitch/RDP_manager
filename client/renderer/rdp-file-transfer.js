@@ -13,6 +13,7 @@
     let generation = 0;
     let remoteRevision = 0;
     let clipboardQueue = Promise.resolve();
+    let virtualReadQueue = Promise.resolve();
     const status = (message) => onStatus(message);
     const extension = (name, value) => new Extension(name, value);
     function submit(stream, data, isError = false) {
@@ -85,6 +86,33 @@
         try { session.invokeExtension(extension('request_file_contents', { stream_id: stream, file_index: file.index, flags, position, size, clip_data_id: file.clipDataId })); }
         catch (error) { clearTimeout(timer); pending = null; reject(error); }
       });
+    }
+    // A future OS clipboard provider can expose these descriptors immediately
+    // and call read only when a destination requests bytes. Each offer is tied
+    // to its original clipboard generation; stale handles must never read the
+    // newly copied remote files by accident.
+    function virtualOffer() {
+      const revision = remoteRevision;
+      const selected = remoteFiles.slice();
+      function assertCurrent() {
+        if (revision !== remoteRevision || !getSession()) throw new Error('Удалённый буфер или сессия изменились.');
+      }
+      async function read(index, position, size) {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= selected.length || selected[index].isDirectory ||
+            !Number.isSafeInteger(position) || position < 0 || !Number.isSafeInteger(size) || size < 1 || size > 1024 * 1024) {
+          throw new Error('Некорректный запрос виртуального файла.');
+        }
+        const operation = virtualReadQueue.then(async () => {
+          assertCurrent();
+          const bytes = await request(selected[index], 2, position, size);
+          assertCurrent();
+          if (bytes.length > size) throw new Error('Некорректный ответ на запрос файла.');
+          return bytes;
+        });
+        virtualReadQueue = operation.catch(() => {});
+        return operation;
+      }
+      return { files: selected.map((file) => ({ ...file })), read };
     }
     function offer(files) {
       const session = getSession();
@@ -173,7 +201,7 @@
       }
       status('Файлы получены.');
     }
-    return { setup, offer, download, reset };
+    return { setup, offer, download, reset, virtualOffer };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRdpFileTransfer };
   else root.createRdpFileTransfer = createRdpFileTransfer;

@@ -82,3 +82,39 @@ test('remote clipboard streams files and folders into a local clipboard receiver
   assert.equal(await finished, true);
   assert.deepEqual(calls.slice(1), [['open', 0], ['open', 1], ['write', 1, 'abc'], ['close', 1], ['commit']]);
 });
+
+test('virtual clipboard reads remote data only on demand and serializes consumers', async () => {
+  const { transfer, callbacks, sent } = harness();
+  callbacks.files_available_callback([{ name: 'x.txt', fileSize: 6 }], 11);
+  const offer = transfer.virtualOffer();
+  assert.equal(sent.length, 0);
+  const a = offer.read(0, 0, 3);
+  const b = offer.read(0, 3, 3);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].value.position, 0);
+  callbacks.file_contents_response_callback({ streamId: sent[0].value.stream_id, data: Buffer.from('abc') });
+  assert.equal(Buffer.from(await a).toString(), 'abc');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].value.position, 3);
+  callbacks.file_contents_response_callback({ streamId: sent[1].value.stream_id, data: Buffer.from('def') });
+  assert.equal(Buffer.from(await b).toString(), 'def');
+  callbacks.files_available_callback([{ name: 'other.txt' }], 12);
+  await assert.rejects(offer.read(0, 0, 1), /буфер или сессия изменились/i);
+  assert.equal(sent.length, 2);
+});
+
+test('virtual clipboard rejects stale in-flight and invalid reads', async () => {
+  const { transfer, callbacks, sent } = harness();
+  callbacks.files_available_callback([{ name: 'a' }, { name: 'folder', isDirectory: true }], 1);
+  const offer = transfer.virtualOffer();
+  await assert.rejects(offer.read(1, 0, 2), /некорректный запрос/i);
+  await assert.rejects(offer.read(0, -1, 2), /некорректный запрос/i);
+  const read = offer.read(0, 0, 2);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  callbacks.files_available_callback([{ name: 'b' }], 2);
+  await assert.rejects(read, /удалённый буфер изменился/i);
+  assert.equal(sent.length, 1);
+});
