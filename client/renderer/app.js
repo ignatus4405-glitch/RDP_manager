@@ -443,6 +443,8 @@ function attachRdpResizeOnce() {
 const RDP_CLIPBOARD_POLL_MS = 800;
 let rdpClipboardTimer = null;
 let rdpClipboardSyncing = false;
+let rdpClipboardForcePending = false;
+let rdpClipboardGeneration = 0;
 const rdpClipboardState = { ignoreLocal: null, lastPushed: null, suspendedText: null, localFiles: false, receiving: false, lastRich: null, ignoreRich: null, writingRemote: false };
 let rdpFileTransfer = null;
 const rdpVirtualOffers = new Map();
@@ -492,19 +494,28 @@ async function rdpPushClipboardText(text) {
   console.log(`[rdp] буфер: отправлено удалённому ${text ? `${text.length} симв.` : '(пусто)'}`);
 }
 
-/** Локальный буфер → удалённый: поллинг раз в 800 мс, только во время сессии. */
+/** Synchronize immediately after connection, and periodically afterwards. */
 function startRdpClipboardSync() {
   stopRdpClipboardSync();
-  rdpClipboardState.lastPushed = null; // первая итерация обязана запушить текущее содержимое
-  rdpClipboardTimer = setInterval(async () => {
-    if (!rdpSession.session || rdpClipboardSyncing || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
+  rdpClipboardState.lastPushed = null;
+  void syncRdpClipboard(true);
+  rdpClipboardTimer = setInterval(() => { void syncRdpClipboard(); }, RDP_CLIPBOARD_POLL_MS);
+}
+
+async function syncRdpClipboard(force = false) {
+    if (!rdpSession.session || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
+    if (rdpClipboardSyncing) { rdpClipboardForcePending ||= force; return; }
+    const generation = rdpClipboardGeneration;
+    const session = rdpSession.session;
+    const isCurrent = () => generation === rdpClipboardGeneration && session === rdpSession.session;
     rdpClipboardSyncing = true;
     try {
       if (window.rdpManager?.fileTransfer) {
         const bridge = window.rdpManager.fileTransfer;
         if (await bridge.virtualActive()) return;
+        if (!isCurrent()) return;
         const snapshot = await bridge.clipboardFiles();
-        if (!rdpSession.session || !rdpFileTransfer) return;
+        if (!isCurrent() || !rdpFileTransfer || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
         rdpClipboardState.localFiles = Boolean(snapshot);
         if (snapshot) {
           if (!snapshot.unchanged && snapshot.files.length) {
@@ -519,30 +530,32 @@ function startRdpClipboardSync() {
             }));
             try { rdpFileTransfer.offer(files); }
             catch (error) { await bridge.resetClipboardFiles(); throw error; }
+          } else if (snapshot.unchanged && force) {
+            rdpFileTransfer.reoffer();
           }
           return;
         }
       }
       if (window.rdpManager?.fileTransfer?.readRich) {
         const rich = await window.rdpManager.fileTransfer.readRich();
-        if (!rdpSession.session || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
+        if (!isCurrent() || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
         if (rich.signature === rdpClipboardState.ignoreRich) {
           rdpClipboardState.ignoreRich = null;
           rdpClipboardState.lastRich = rich.signature;
           return;
         }
-        if (rich.signature === rdpClipboardState.lastRich) return;
+        if (!force && rich.signature === rdpClipboardState.lastRich) return;
         const data = new window.IronRDP.ClipboardData();
         for (const entry of rich.entries) {
           if (entry.type === 'image/png') data.addBinary(entry.type, new Uint8Array(entry.value));
           else data.addText(entry.type, entry.value);
         }
-        await rdpSession.session.onClipboardPaste(data);
-        rdpClipboardState.lastRich = rich.signature;
+        await session.onClipboardPaste(data);
+        if (isCurrent()) rdpClipboardState.lastRich = rich.signature;
         return;
       }
       const text = await rdpReadLocalClipboard();
-      if (text === null) return;
+      if (!isCurrent() || text === null) return;
       if (rdpClipboardState.suspendedText !== null) {
         if (text === rdpClipboardState.suspendedText) return;
         rdpClipboardState.suspendedText = null;
@@ -553,18 +566,25 @@ function startRdpClipboardSync() {
         rdpClipboardState.lastPushed = text;
         return;
       }
-      if (text === rdpClipboardState.lastPushed) return;
+      if (!force && text === rdpClipboardState.lastPushed) return;
       await rdpPushClipboardText(text ?? '');
     } catch (err) {
       // Важно: lastPushed не обновляем — содержимое будет отправлено на следующей итерации
       console.warn('Clipboard (local→remote):', err);
     } finally {
-      rdpClipboardSyncing = false;
+      if (generation === rdpClipboardGeneration) {
+        rdpClipboardSyncing = false;
+        if (rdpClipboardForcePending) {
+          rdpClipboardForcePending = false;
+          void syncRdpClipboard(true);
+        }
+      }
     }
-  }, RDP_CLIPBOARD_POLL_MS);
 }
 
 function stopRdpClipboardSync() {
+  rdpClipboardGeneration++;
+  rdpClipboardForcePending = false;
   if (rdpClipboardTimer) { clearInterval(rdpClipboardTimer); rdpClipboardTimer = null; }
   rdpClipboardSyncing = false;
   rdpClipboardState.ignoreLocal = null;
@@ -606,27 +626,7 @@ function setupRdpClipboard(builder) {
 
   // Канал CLIPRDR просит наш список форматов (при инициализации и далее, когда remote ждёт
   // наши данные) — пушим текущее содержимое локального буфера
-  builder.forceClipboardUpdateCallback(async () => {
-    try {
-      if (rdpClipboardState.localFiles || rdpClipboardState.receiving || rdpClipboardState.writingRemote || await window.rdpManager?.fileTransfer?.virtualActive()) return;
-      if (window.rdpManager?.fileTransfer?.readRich) {
-        const rich = await window.rdpManager.fileTransfer.readRich();
-        if (!rdpSession.session || rdpClipboardState.receiving) return;
-        const data = new window.IronRDP.ClipboardData();
-        for (const entry of rich.entries) {
-          if (entry.type === 'image/png') data.addBinary(entry.type, new Uint8Array(entry.value));
-          else data.addText(entry.type, entry.value);
-        }
-        await rdpSession.session.onClipboardPaste(data);
-        rdpClipboardState.lastRich = rich.signature;
-      } else {
-        const text = await rdpReadLocalClipboard();
-        if (text !== null) await rdpPushClipboardText(text);
-      }
-    } catch (err) {
-      console.warn('Clipboard (local→remote):', err);
-    }
-  });
+  builder.forceClipboardUpdateCallback(() => { void syncRdpClipboard(true); });
 }
 
 /** Клавиатура/мышь/колесо на canvas. Обработчики подключаются один раз. */
