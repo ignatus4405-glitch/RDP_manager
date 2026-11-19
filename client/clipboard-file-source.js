@@ -8,11 +8,16 @@ const crypto = require('node:crypto');
 function createClipboardFileSource({ clipboard }) {
   let snapshot = '';
   let files = new Map();
+  let generation = 0;
   async function inspect() {
+    const currentGeneration = generation;
+    const ensureCurrent = () => { if (generation !== currentGeneration) throw new Error('Буфер обмена был сброшен.'); };
     const items = await clipboard.read();
+    ensureCurrent();
     const item = items.find((candidate) => candidate.types.includes('text/uri-list'));
     if (!item) { snapshot = ''; files = new Map(); return null; }
     const raw = await (await item.getType('text/uri-list')).text();
+    ensureCurrent();
     const urls = raw.split(/\r?\n/).filter((line) => line && !line.startsWith('#'));
     if (!urls.length) { snapshot = ''; files = new Map(); return null; }
     if (raw === snapshot) return { unchanged: true };
@@ -39,6 +44,7 @@ function createClipboardFileSource({ clipboard }) {
       }
     }
     for (const root of roots) await visit(root, path.basename(root));
+    ensureCurrent();
     snapshot = raw;
     files = next;
     return { unchanged: false, files: descriptors };
@@ -55,7 +61,7 @@ function createClipboardFileSource({ clipboard }) {
       return bytes.subarray(0, bytesRead);
     } finally { await handle.close(); }
   }
-  function reset() { snapshot = ''; files = new Map(); }
+  function reset() { generation++; snapshot = ''; files = new Map(); }
   return { inspect, read, reset };
 }
 module.exports = { createClipboardFileSource };

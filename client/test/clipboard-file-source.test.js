@@ -26,3 +26,25 @@ test('clipboard file capabilities cover only copied files and preserve directori
   await source.inspect();
   await assert.rejects(source.read(result.files[1].id, 0, 1));
 });
+
+test('a scan from an old session cannot repopulate capabilities after reset', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rdp-clip-reset-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const filename = path.join(dir, 'a.txt');
+  await fs.writeFile(filename, 'new');
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const clipboard = { read: async () => {
+    if (++calls === 1) await gate;
+    return [{ types: ['text/uri-list'], getType: async () => new Blob([pathToFileURL(filename).href]) }];
+  } };
+  const source = createClipboardFileSource({ clipboard });
+  const old = source.inspect();
+  source.reset();
+  const current = await source.inspect();
+  release();
+  await assert.rejects(old, /сброшен/);
+  assert.equal((await source.read(current.files[0].id, 0, 3)).toString(), 'new');
+  assert.equal((await source.inspect()).unchanged, true);
+});
