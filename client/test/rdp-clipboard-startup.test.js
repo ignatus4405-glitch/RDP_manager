@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 function setup({ snapshot, readRich }) {
   const source = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
-  const section = source.slice(source.indexOf('const RDP_CLIPBOARD_POLL_MS'), source.indexOf('/** Буфер обмена: remote'));
+  const section = source.slice(source.indexOf('const RDP_CLIPBOARD_POLL_MS'), source.indexOf('/** Клавиатура/мышь/колесо'));
   const callbacks = [];
   const sent = [];
   const session = { onClipboardPaste: async (data) => { sent.push(data); } };
@@ -19,7 +19,7 @@ function setup({ snapshot, readRich }) {
   class ClipboardData { constructor() { this.entries = []; } addText(type, value) { this.entries.push({ type, value }); } }
   const context = { window: { rdpManager: { fileTransfer: bridge }, IronRDP: { ClipboardData } }, rdpSession: { session }, console, setInterval: (fn) => { callbacks.push(fn); return 1; }, clearInterval() {}, navigator: {} };
   vm.createContext(context);
-  vm.runInContext(section + '\nthis.startSync = startRdpClipboardSync; this.sync = syncRdpClipboard; this.stopSync = stopRdpClipboardSync; this.setTransfer = (value) => { rdpFileTransfer = value; };', context);
+  vm.runInContext(section + '\nthis.startSync = startRdpClipboardSync; this.sync = syncRdpClipboard; this.stopSync = stopRdpClipboardSync; this.setTransfer = (value) => { rdpFileTransfer = value; }; this.setupClipboard = setupRdpClipboard; this.clipboardState = rdpClipboardState;', context);
   return { context, callbacks, sent };
 }
 
@@ -56,4 +56,18 @@ test('a forced refresh arriving during an in-flight poll is performed after it f
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(reads, 2);
   assert.equal(h.sent.length, 2);
+});
+
+test('callbacks from an old connection do not alter the next session clipboard state', async () => {
+  const h = setup({ snapshot: () => null, readRich: async () => ({ signature: '', entries: [] }) });
+  let current = true;
+  let remoteCallback, forceCallback;
+  const builder = { remoteClipboardChangedCallback: (fn) => { remoteCallback = fn; }, forceClipboardUpdateCallback: (fn) => { forceCallback = fn; } };
+  h.context.setupClipboard(builder, () => current);
+  current = false;
+  await remoteCallback({ isEmpty: () => false, items: () => [{ mimeType: () => 'text/plain', value: () => 'old' }] });
+  forceCallback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.context.clipboardState.writingRemote, false);
 });

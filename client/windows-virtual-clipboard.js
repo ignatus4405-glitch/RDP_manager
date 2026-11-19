@@ -6,12 +6,13 @@ const { validateParts } = require('./rdp-clipboard-receiver');
 
 function createWindowsVirtualClipboard({ executable, sendRequest, spawnProcess = spawn }) {
   let active = null;
-  function clear() {
+  function clear(token) {
+    if (token !== undefined && active?.token !== token) return;
     const previous = active;
     active = null;
     if (previous) previous.child.kill();
   }
-  function isActive() { return Boolean(active?.ready); }
+  function isActive() { return Boolean(active); }
   async function publish(files) {
     if (!Array.isArray(files) || !files.length) throw new Error('Нет файлов для публикации.');
     const seen = new Set();

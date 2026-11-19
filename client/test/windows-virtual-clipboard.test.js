@@ -49,3 +49,21 @@ test('OLE host validates untrusted paths and rejects invalid reads', async () =>
   assert.equal(hosts[0].killed, true);
   assert.equal(bridge.isActive(), false);
 });
+
+test('cleanup of an old OLE offer cannot kill a new session host', async () => {
+  const hosts = [];
+  const bridge = createWindowsVirtualClipboard({ executable: 'helper.exe', sendRequest() {}, spawnProcess: () => { const child = makeHost(); hosts.push(child); return child; } });
+  const first = bridge.publish([{ name: 'first', size: 1 }]);
+  assert.equal(bridge.isActive(), true);
+  hosts[0].stdout.write('READY\n');
+  const oldToken = await first;
+  const second = bridge.publish([{ name: 'second', size: 1 }]);
+  hosts[1].stdout.write('READY\n');
+  const newToken = await second;
+  bridge.clear(oldToken);
+  assert.equal(hosts[1].killed, undefined);
+  assert.equal(bridge.isActive(), true);
+  bridge.clear(newToken);
+  assert.equal(hosts[1].killed, true);
+  assert.equal(bridge.isActive(), false);
+});

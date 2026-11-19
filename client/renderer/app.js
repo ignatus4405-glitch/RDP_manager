@@ -274,6 +274,8 @@ const rdpSession = {
   lastSizeH: 0,
 };
 
+let rdpConnectionAttempt = 0;
+
 const rdpConnAddress = (conn) =>
   `${conn.address}${conn.type === 'rdp' && conn.port && conn.port !== 3389 ? ':' + conn.port : ''}`;
 
@@ -371,6 +373,8 @@ function openEmbeddedRdp(conn) {
 }
 
 function teardownRdpSession() {
+  rdpConnectionAttempt++;
+  $('rdpConnectBtn').disabled = false;
   const s = rdpSession.session;
   rdpSession.session = null;
   rdpSession.lastSizeW = 0;
@@ -599,8 +603,9 @@ function stopRdpClipboardSync() {
 }
 
 /** Буфер обмена: remote ↔ local (текст). Локальный буфер поллим, пока сессия активна. */
-function setupRdpClipboard(builder) {
+function setupRdpClipboard(builder, isCurrent = () => true) {
   builder.remoteClipboardChangedCallback(async (clipboardData) => {
+    if (!isCurrent()) return;
     try {
       if (!clipboardData || clipboardData.isEmpty()) return;
       const entries = clipboardData.items().map((item) => ({ type: item.mimeType(), value: item.value() }))
@@ -609,8 +614,9 @@ function setupRdpClipboard(builder) {
       if (window.rdpManager?.fileTransfer?.writeRich) {
         rdpClipboardState.writingRemote = true;
         try {
-          rdpClipboardState.ignoreRich = await window.rdpManager.fileTransfer.writeRich(entries);
-        } finally { rdpClipboardState.writingRemote = false; }
+          const signature = await window.rdpManager.fileTransfer.writeRich(entries);
+          if (isCurrent()) rdpClipboardState.ignoreRich = signature;
+        } finally { if (isCurrent()) rdpClipboardState.writingRemote = false; }
       } else {
         const text = entries.find((item) => item.type === 'text/plain')?.value;
         if (typeof text === 'string') {
@@ -626,7 +632,7 @@ function setupRdpClipboard(builder) {
 
   // Канал CLIPRDR просит наш список форматов (при инициализации и далее, когда remote ждёт
   // наши данные) — пушим текущее содержимое локального буфера
-  builder.forceClipboardUpdateCallback(() => { void syncRdpClipboard(true); });
+  builder.forceClipboardUpdateCallback(() => { if (isCurrent()) void syncRdpClipboard(true); });
 }
 
 /** Клавиатура/мышь/колесо на canvas. Обработчики подключаются один раз. */
@@ -701,12 +707,15 @@ async function startEmbeddedRdp() {
     return;
   }
 
+  const attempt = ++rdpConnectionAttempt;
+  const isCurrentAttempt = () => attempt === rdpConnectionAttempt;
   const connectBtn = $('rdpConnectBtn');
   connectBtn.disabled = true;
   const destination = rdpConnAddress(conn);
 
   // Предполетная проверка версии сервера (/ws/rdp есть только в v1.3.0+)
   const preflightProblem = await rdpPreflight();
+  if (!isCurrentAttempt()) return;
   if (preflightProblem) {
     formError.textContent = preflightProblem;
     setRdpStatus('Сервер слишком старый', 'error');
@@ -718,6 +727,7 @@ async function startEmbeddedRdp() {
   try {
     const IronRDP = window.IronRDP;
     await IronRDP.init();
+    if (!isCurrentAttempt()) return;
     try { IronRDP.setup('info'); } catch { /* логирование не критично */ }
 
     // Размер десктопа: всё доступное пространство .rdp-body, чётные значения
@@ -741,23 +751,37 @@ async function startEmbeddedRdp() {
     builder.extension(enableDisplayControl);
     builder.setCursorStyleCallbackContext(canvas);
     builder.setCursorStyleCallback((style) => { canvas.style.cursor = style || 'default'; });
-    setupRdpClipboard(builder);
+    setupRdpClipboard(builder, isCurrentAttempt);
     const useVirtualClipboard = Boolean(await window.rdpManager?.fileTransfer?.virtualAvailable());
+    if (!isCurrentAttempt()) return;
+    let virtualClipboardToken = null;
     const virtualClipboard = useVirtualClipboard ? {
       async publish(offer) {
-        rdpVirtualOffers.clear();
         const token = await window.rdpManager.fileTransfer.virtualPublish(offer.files);
+        if (!isCurrentAttempt()) {
+          await window.rdpManager.fileTransfer.virtualClear(token);
+          throw new Error('Сессия RDP завершена.');
+        }
+        if (virtualClipboardToken) rdpVirtualOffers.delete(virtualClipboardToken);
+        virtualClipboardToken = token;
         rdpVirtualOffers.set(token, offer);
         try { await window.rdpManager.fileTransfer.virtualActivate(token); }
         catch (error) { rdpVirtualOffers.delete(token); throw error; }
       },
-      async clear() { rdpVirtualOffers.clear(); await window.rdpManager.fileTransfer.virtualClear(); },
+      async clear() {
+        const token = virtualClipboardToken;
+        virtualClipboardToken = null;
+        if (!token) return;
+        rdpVirtualOffers.delete(token);
+        await window.rdpManager.fileTransfer.virtualClear(token);
+      },
     } : null;
     rdpFileTransfer = window.createRdpFileTransfer({
       getSession: () => rdpSession.session,
       Extension: IronRDP.Extension,
-      onStatus: (message) => { $('rdpFileStatus').textContent = message; },
+      onStatus: (message) => { if (isCurrentAttempt()) $('rdpFileStatus').textContent = message; },
       onRemoteFiles: (receiving) => {
+        if (!isCurrentAttempt()) return;
         rdpClipboardState.receiving = receiving;
         rdpClipboardState.suspendedText = window.rdpManager?.fileTransfer ? null : (rdpClipboardState.lastPushed ?? '');
         const transfer = rdpFileTransfer;
@@ -775,6 +799,7 @@ async function startEmbeddedRdp() {
         cancel: (id) => window.rdpManager.fileTransfer.receiveCancel(id),
       } : null,
       onClipboardFinished: async (success) => {
+        if (!isCurrentAttempt()) return;
         if (useVirtualClipboard && !success) {
           $('rdpFileSend').classList.remove('hidden');
           $('rdpFileReceive').classList.remove('hidden');
@@ -783,7 +808,7 @@ async function startEmbeddedRdp() {
           // Mark the staged files as already seen, to avoid echoing them back to RDP.
           try { await window.rdpManager.fileTransfer.clipboardFiles(); } catch (error) { console.warn('Clipboard:', error); }
         }
-        rdpClipboardState.receiving = false;
+        if (isCurrentAttempt()) rdpClipboardState.receiving = false;
       },
       openFile: async (name) => {
         if (window.rdpManager?.fileTransfer) {
@@ -802,6 +827,7 @@ async function startEmbeddedRdp() {
     $('rdpScreenHint').textContent = `Подключение к ${destination}…`;
 
     const session = await builder.connect();
+    if (!isCurrentAttempt()) { try { session.shutdown(); } catch { /* already closed */ } return; }
     rdpSession.session = session;
 
     const ds = session.desktopSize();
@@ -837,12 +863,13 @@ async function startEmbeddedRdp() {
       setRdpStatus('Ошибка сессии', 'error');
     });
   } catch (err) {
-    rdpSession.session = null;
+    if (!isCurrentAttempt()) return;
+    teardownRdpSession();
     showRdpForm(true);
     formError.textContent = rdpErrorText(err);
     setRdpStatus('Ошибка подключения', 'error');
   } finally {
-    connectBtn.disabled = false;
+    if (isCurrentAttempt()) connectBtn.disabled = false;
   }
 }
 

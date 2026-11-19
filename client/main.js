@@ -363,7 +363,7 @@ ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event);
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
 ipcMain.handle('rdp-virtual-publish', (event, files) => { requireClientWindow(event); if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.'); return windowsVirtualClipboard.publish(files); });
 ipcMain.handle('rdp-virtual-activate', (event, token) => { requireClientWindow(event); return windowsVirtualClipboard.activate(token); });
-ipcMain.handle('rdp-virtual-clear', (event) => { requireClientWindow(event); return windowsVirtualClipboard.clear(); });
+ipcMain.handle('rdp-virtual-clear', (event, token) => { requireClientWindow(event); if (typeof token !== 'string') return; return windowsVirtualClipboard.clear(token); });
 ipcMain.handle('rdp-virtual-response', (event, response) => { requireClientWindow(event); return windowsVirtualClipboard.respond(response); });
 ipcMain.handle('rdp-clipboard-read-rich', (event) => { requireClientWindow(event); return richClipboard.read(); });
 ipcMain.handle('rdp-clipboard-write-rich', (event, entries) => { requireClientWindow(event); return richClipboard.write(entries); });
