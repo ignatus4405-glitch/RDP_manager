@@ -7,3 +7,5 @@ out/
 client/renderer/vendor/
 client/build/server-payload/
 client/build/WinSW-*-x64.exe
+
+client/build/rdp-virtual-clipboard.exe
