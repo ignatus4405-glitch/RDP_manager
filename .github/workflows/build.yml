@@ -46,6 +46,21 @@ jobs:
         shell: bash
         run: npm test
 
+      - name: Проверка нативного OLE-компонента
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual C++ build tools not found' }
+          $envscript = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $output = cmd /c "`"$envscript`" && cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE client\windows\virtual-clipboard.cpp client\windows\virtual-clipboard-test.cpp /Fe:virtual-clipboard-test.exe /link ole32.lib shell32.lib user32.lib uuid.lib && virtual-clipboard-test.exe" 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            $output | Select-Object -Last 15 | ForEach-Object { Write-Host "::error::$($_.ToString().Replace('%', '%25').Replace(':', '%3A'))" }
+            exit $code
+          }
+
       - name: Подготовка Windows-службы и объединённого установщика
         if: runner.os == 'Windows'
         shell: bash
