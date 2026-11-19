@@ -37,15 +37,19 @@ public:
         const ULONGLONG length = source->files[index].size;
         ULONG count = static_cast<ULONG>((std::min)(static_cast<ULONGLONG>(size), length - (std::min)(position, length)));
         if (!count) return size ? S_FALSE : S_OK;
-        ULONG actual = 0;
-        HRESULT hr;
-        try { hr = source->read(index, position, data, count, &actual); }
-        catch (...) { return STG_E_READFAULT; }
-        if (FAILED(hr)) return hr;
-        if (actual > count || (!actual && count)) return STG_E_READFAULT;
-        position += actual;
-        if (received) *received = actual;
-        return actual == size ? S_OK : S_FALSE;
+        ULONG total = 0;
+        while (total < count) {
+            ULONG actual = 0;
+            HRESULT hr;
+            try { hr = source->read(index, position, static_cast<BYTE*>(data) + total, count - total, &actual); }
+            catch (...) { return STG_E_READFAULT; }
+            if (FAILED(hr)) return hr;
+            if (actual > count - total || !actual) return STG_E_READFAULT;
+            position += actual;
+            total += actual;
+            if (received) *received = total;
+        }
+        return total == size ? S_OK : S_FALSE;
     }
     HRESULT STDMETHODCALLTYPE Write(const void*, ULONG, ULONG*) override { return STG_E_ACCESSDENIED; }
     HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER* result) override {

@@ -380,6 +380,8 @@ function teardownRdpSession() {
   rdpFileTransfer = null;
   $('rdpFileSend').disabled = true;
   $('rdpFileReceive').disabled = true;
+  $('rdpFileSend').classList.remove('hidden');
+  $('rdpFileReceive').classList.remove('hidden');
   $('rdpFileStatus').textContent = '';
   if (s) { try { s.shutdown(); } catch { /* уже завершена */ } }
   $('rdpDisconnectBtn').disabled = true;
@@ -443,6 +445,17 @@ let rdpClipboardTimer = null;
 let rdpClipboardSyncing = false;
 const rdpClipboardState = { ignoreLocal: null, lastPushed: null, suspendedText: null, localFiles: false, receiving: false, lastRich: null, ignoreRich: null, writingRemote: false };
 let rdpFileTransfer = null;
+const rdpVirtualOffers = new Map();
+window.rdpManager?.fileTransfer?.onVirtualRead(async (request) => {
+  const offer = rdpVirtualOffers.get(request.token);
+  try {
+    if (!offer) throw new Error('Содержимое буфера изменилось.');
+    const bytes = await offer.read(request.index, request.position, request.size);
+    await window.rdpManager.fileTransfer.virtualRespond({ token: request.token, requestId: request.requestId, bytes });
+  } catch (error) {
+    await window.rdpManager.fileTransfer.virtualRespond({ token: request.token, requestId: request.requestId, error: true }).catch(() => {});
+  }
+});
 
 async function rdpReadLocalClipboard() {
   try {
@@ -489,6 +502,7 @@ function startRdpClipboardSync() {
     try {
       if (window.rdpManager?.fileTransfer) {
         const bridge = window.rdpManager.fileTransfer;
+        if (await bridge.virtualActive()) return;
         const snapshot = await bridge.clipboardFiles();
         if (!rdpSession.session || !rdpFileTransfer) return;
         rdpClipboardState.localFiles = Boolean(snapshot);
@@ -594,7 +608,7 @@ function setupRdpClipboard(builder) {
   // наши данные) — пушим текущее содержимое локального буфера
   builder.forceClipboardUpdateCallback(async () => {
     try {
-      if (rdpClipboardState.localFiles || rdpClipboardState.receiving || rdpClipboardState.writingRemote) return;
+      if (rdpClipboardState.localFiles || rdpClipboardState.receiving || rdpClipboardState.writingRemote || await window.rdpManager?.fileTransfer?.virtualActive()) return;
       if (window.rdpManager?.fileTransfer?.readRich) {
         const rich = await window.rdpManager.fileTransfer.readRich();
         if (!rdpSession.session || rdpClipboardState.receiving) return;
@@ -728,6 +742,17 @@ async function startEmbeddedRdp() {
     builder.setCursorStyleCallbackContext(canvas);
     builder.setCursorStyleCallback((style) => { canvas.style.cursor = style || 'default'; });
     setupRdpClipboard(builder);
+    const useVirtualClipboard = Boolean(await window.rdpManager?.fileTransfer?.virtualAvailable());
+    const virtualClipboard = useVirtualClipboard ? {
+      async publish(offer) {
+        rdpVirtualOffers.clear();
+        const token = await window.rdpManager.fileTransfer.virtualPublish(offer.files);
+        rdpVirtualOffers.set(token, offer);
+        try { await window.rdpManager.fileTransfer.virtualActivate(token); }
+        catch (error) { rdpVirtualOffers.delete(token); throw error; }
+      },
+      async clear() { rdpVirtualOffers.clear(); await window.rdpManager.fileTransfer.virtualClear(); },
+    } : null;
     rdpFileTransfer = window.createRdpFileTransfer({
       getSession: () => rdpSession.session,
       Extension: IronRDP.Extension,
@@ -736,10 +761,11 @@ async function startEmbeddedRdp() {
         rdpClipboardState.receiving = receiving;
         rdpClipboardState.suspendedText = window.rdpManager?.fileTransfer ? null : (rdpClipboardState.lastPushed ?? '');
         const transfer = rdpFileTransfer;
-        rdpReadLocalClipboard().then((text) => {
-          if (rdpFileTransfer === transfer && !window.rdpManager?.fileTransfer) rdpClipboardState.suspendedText = text ?? '';
+        if (!window.rdpManager?.fileTransfer) rdpReadLocalClipboard().then((text) => {
+          if (rdpFileTransfer === transfer) rdpClipboardState.suspendedText = text ?? '';
         });
       },
+      virtualClipboard,
       clipboardReceiver: window.rdpManager?.fileTransfer ? {
         begin: (files) => window.rdpManager.fileTransfer.receiveBegin(files),
         open: (id, index) => window.rdpManager.fileTransfer.receiveOpen(id, index),
@@ -749,7 +775,11 @@ async function startEmbeddedRdp() {
         cancel: (id) => window.rdpManager.fileTransfer.receiveCancel(id),
       } : null,
       onClipboardFinished: async (success) => {
-        if (success) {
+        if (useVirtualClipboard && !success) {
+          $('rdpFileSend').classList.remove('hidden');
+          $('rdpFileReceive').classList.remove('hidden');
+        }
+        if (success && !useVirtualClipboard) {
           // Mark the staged files as already seen, to avoid echoing them back to RDP.
           try { await window.rdpManager.fileTransfer.clipboardFiles(); } catch (error) { console.warn('Clipboard:', error); }
         }
@@ -785,6 +815,8 @@ async function startEmbeddedRdp() {
     startRdpClipboardSync();
     $('rdpPassword').value = '';
     $('rdpDisconnectBtn').disabled = false;
+    $('rdpFileSend').classList.toggle('hidden', useVirtualClipboard);
+    $('rdpFileReceive').classList.toggle('hidden', useVirtualClipboard);
     $('rdpFileSend').disabled = false;
     $('rdpFileReceive').disabled = false;
     setRdpStatus(`Подключено · ${ds.width}×${ds.height}`, 'connected');

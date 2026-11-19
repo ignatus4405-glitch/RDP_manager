@@ -4,8 +4,19 @@
 #include <cassert>
 #include <cstring>
 using namespace rdp_clipboard;
-int main() {
+int main(int argc, char**) {
     assert(SUCCEEDED(OleInitialize(nullptr)));
+    if (argc > 1) {
+        IDataObject* clipboard = nullptr;
+        assert(SUCCEEDED(OleGetClipboard(&clipboard)) && clipboard);
+        FORMATETC format{static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILECONTENTS)), nullptr, DVASPECT_CONTENT, 0, TYMED_ISTREAM};
+        STGMEDIUM medium{};
+        assert(SUCCEEDED(clipboard->GetData(&format, &medium)));
+        char buffer[6]{}; ULONG actual = 0;
+        assert(SUCCEEDED(medium.pstm->Read(buffer, 5, &actual)) && actual == 5);
+        assert(std::strcmp(buffer, "hello") == 0);
+        ReleaseStgMedium(&medium); clipboard->Release(); OleUninitialize(); return 0;
+    }
     IDataObject* data = nullptr;
     int calls = 0;
     const std::vector<File> files = {{L"folder", 0, true}, {L"folder\\hello.txt", 5, false}};

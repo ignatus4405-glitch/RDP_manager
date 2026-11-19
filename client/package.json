@@ -32,13 +32,15 @@
       "clipboard-file-source.js",
       "rdp-clipboard-receiver.js",
       "clipboard-rich.js",
+      "windows-virtual-clipboard.js",
       "renderer/**",
       "assets/**"
     ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.png",
-      "artifactName": "RDPManager-Setup-${version}.${ext}"
+      "artifactName": "RDPManager-Setup-${version}.${ext}",
+      "extraResources": [{ "from": "build/rdp-virtual-clipboard.exe", "to": "rdp-virtual-clipboard.exe" }]
     },
     "nsis": {
       "oneClick": false,

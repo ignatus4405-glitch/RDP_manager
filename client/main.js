@@ -14,6 +14,7 @@ const { createRdpFileWriter } = require('./rdp-file-writer');
 const { createClipboardFileSource } = require('./clipboard-file-source');
 const { createClipboardReceiver } = require('./rdp-clipboard-receiver');
 const { createRichClipboard } = require('./clipboard-rich');
+const { createWindowsVirtualClipboard } = require('./windows-virtual-clipboard');
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -29,6 +30,14 @@ const fileWriter = createRdpFileWriter({
   choosePath: async (name) => {
     const result = await dialog.showSaveDialog(mainWindow, { title: 'Сохранить файл из RDP', defaultPath: String(name) });
     return result.canceled ? null : result.filePath;
+  },
+});
+const virtualClipboardExecutable = app.isPackaged ? path.join(process.resourcesPath, 'rdp-virtual-clipboard.exe') : path.join(__dirname, 'build', 'rdp-virtual-clipboard.exe');
+const windowsVirtualClipboard = createWindowsVirtualClipboard({
+  executable: virtualClipboardExecutable,
+  sendRequest: (request) => {
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Окно клиента недоступно.');
+    mainWindow.webContents.send('rdp-virtual-read', request);
   },
 });
 const clipboardFileSource = createClipboardFileSource({ clipboard });
@@ -60,7 +69,7 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  mainWindow.on('closed', () => { mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); });
+  mainWindow.on('closed', () => { mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); windowsVirtualClipboard.clear(); });
 }
 
 function createServerManagerWindow() {
@@ -350,6 +359,12 @@ ipcMain.handle('clipboard-write', async (_event, text) => { await clipboard.writ
 function requireClientWindow(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Операция доступна только окну клиента.');
 }
+ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
+ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
+ipcMain.handle('rdp-virtual-publish', (event, files) => { requireClientWindow(event); if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.'); return windowsVirtualClipboard.publish(files); });
+ipcMain.handle('rdp-virtual-activate', (event, token) => { requireClientWindow(event); return windowsVirtualClipboard.activate(token); });
+ipcMain.handle('rdp-virtual-clear', (event) => { requireClientWindow(event); return windowsVirtualClipboard.clear(); });
+ipcMain.handle('rdp-virtual-response', (event, response) => { requireClientWindow(event); return windowsVirtualClipboard.respond(response); });
 ipcMain.handle('rdp-clipboard-read-rich', (event) => { requireClientWindow(event); return richClipboard.read(); });
 ipcMain.handle('rdp-clipboard-write-rich', (event, entries) => { requireClientWindow(event); return richClipboard.write(entries); });
 ipcMain.handle('rdp-clipboard-files', (event) => { requireClientWindow(event); return clipboardFileSource.inspect(); });
