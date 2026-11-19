@@ -1,0 +1,31 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+test('remote layout switch is scoped to focus and releases modifiers', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+  const section = source.slice(source.indexOf('function attachRdpInputOnce()'), source.indexOf('async function startEmbeddedRdp()'));
+  const listeners = {}; const winListeners = {}; const transactions = []; const focus = [];
+  const canvas = { addEventListener: (name, fn) => { listeners[name] = fn; } };
+  let switched;
+  const document = { activeElement: canvas, hasFocus: () => true };
+  class InputTransaction { constructor() { this.events = []; } addEvent(event) { this.events.push(event); } }
+  const DE = { keyPressed: (n) => ['down', n], keyReleased: (n) => ['up', n] };
+  const session = { applyInputs: (tx) => transactions.push(tx.events) };
+  const context = { console, document, $: () => canvas, rdpSession: { session, inputAttached: false }, rdpLayoutFocusToken: 0, releaseRdpKeys: () => {}, RDP_SCANCODE_MAP: { AltLeft: 0x38, KeyA: 0x1e }, window: { IronRDP: { InputTransaction, DeviceEvent: DE }, rdpManager: { rdpLayoutFocus: (active, token) => focus.push([active, token]), onRdpLayoutSwitch: (cb) => { switched = cb; } }, addEventListener: (name, fn) => { winListeners[name] = fn; } } };
+  vm.createContext(context); vm.runInContext(section + '\nthis.attach = attachRdpInputOnce;', context);
+  context.attach(); listeners.focus();
+  const token = focus.at(-1)[1];
+  listeners.keydown({ code: 'AltLeft', preventDefault() {} });
+  switched(token);
+  assert.deepEqual(JSON.parse(JSON.stringify(transactions.at(-1))), [['down', 0x38], ['down', 0x2a], ['up', 0x2a], ['up', 0x38]]);
+  listeners.keydown({ code: 'KeyA', preventDefault() {} });
+  document.activeElement = null; listeners.blur();
+  assert.deepEqual(JSON.parse(JSON.stringify(transactions.at(-1))), [['up', 0x1e]]);
+  const count = transactions.length;
+  switched(token);
+  assert.equal(transactions.length, count);
+  assert.equal(focus.at(-1)[0], false);
+});

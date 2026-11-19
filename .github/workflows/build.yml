@@ -53,7 +53,7 @@ jobs:
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $vs) { throw 'Visual C++ build tools not found' }
           $envscript = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
-          $output = cmd /c "`"$envscript`" && cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE client\windows\virtual-clipboard.cpp client\windows\virtual-clipboard-test.cpp /Fe:virtual-clipboard-test.exe /link ole32.lib shell32.lib user32.lib uuid.lib && virtual-clipboard-test.exe && cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE client\windows\virtual-clipboard.cpp client\windows\virtual-clipboard-host.cpp /Fe:client\build\rdp-virtual-clipboard.exe /link ole32.lib shell32.lib user32.lib uuid.lib crypt32.lib && node client\windows\virtual-clipboard-host-test.js" 2>&1
+          $output = cmd /c "`"$envscript`" && cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE client\windows\virtual-clipboard.cpp client\windows\virtual-clipboard-test.cpp /Fe:virtual-clipboard-test.exe /link ole32.lib shell32.lib user32.lib uuid.lib && virtual-clipboard-test.exe && cl /nologo /EHsc /std:c++17 /DUNICODE /D_UNICODE client\windows\virtual-clipboard.cpp client\windows\virtual-clipboard-host.cpp /Fe:client\build\rdp-virtual-clipboard.exe /link ole32.lib shell32.lib user32.lib uuid.lib crypt32.lib && node client\windows\virtual-clipboard-host-test.js && cl /nologo /EHsc /std:c++17 client\windows\rdp-layout-hook.cpp /Fe:client\build\rdp-layout-hook.exe /link user32.lib" 2>&1
           $code = $LASTEXITCODE
           $output | ForEach-Object { Write-Host $_ }
           if ($code -ne 0) {

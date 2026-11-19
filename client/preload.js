@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('rdpManager', {
   writeClipboard: (text) => ipcRenderer.invoke('clipboard-write', text),
   /** ОС клиента: win32 | linux | darwin */
   platform: process.platform,
+  rdpLayoutFocus: (focused, token) => ipcRenderer.send('rdp-layout-focus', Boolean(focused), token),
+  onRdpLayoutSwitch: (cb) => bindChannel('rdp-layout-switch', cb),
   fileTransfer: {
     virtualAvailable: () => ipcRenderer.invoke('rdp-virtual-available'),
     virtualActive: () => ipcRenderer.invoke('rdp-virtual-active'),
