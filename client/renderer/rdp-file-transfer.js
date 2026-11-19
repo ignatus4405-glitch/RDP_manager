@@ -148,6 +148,9 @@
       catch (error) { localFiles = []; throw error; }
       status('Файлы готовы. Вставьте их на удалённом компьютере (Ctrl+V).');
     }
+    function reoffer() {
+      if (localFiles.length) offer(localFiles);
+    }
     async function copyToClipboard(selected, revision) {
       const check = () => {
         if (revision !== remoteRevision || !getSession()) throw new Error('Содержимое буфера или сессия изменились.');
@@ -224,7 +227,7 @@
       }
       status('Файлы получены.');
     }
-    return { setup, offer, download, reset, virtualOffer };
+    return { setup, offer, reoffer, download, reset, virtualOffer };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRdpFileTransfer };
   else root.createRdpFileTransfer = createRdpFileTransfer;

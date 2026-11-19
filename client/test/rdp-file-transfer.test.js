@@ -163,3 +163,16 @@ test('virtual clipboard serializes replacement and invalidates old offers', asyn
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(published.at(-1), null);
 });
+
+test('forced reoffer re-advertises the current file list and does nothing after reset', () => {
+  const { transfer, sent } = harness();
+  const file = { name: 'hello.txt', size: 12, lastModified: 0 };
+  transfer.offer([file]);
+  transfer.reoffer();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].name, 'initiate_file_copy');
+  assert.equal(sent[1].value[0].name, 'hello.txt');
+  transfer.reset();
+  transfer.reoffer();
+  assert.equal(sent.length, 2);
+});
