@@ -275,6 +275,8 @@ const rdpSession = {
 };
 
 let rdpConnectionAttempt = 0;
+let rdpLayoutFocusToken = 0;
+let releaseRdpKeys = () => {};
 
 const rdpConnAddress = (conn) =>
   `${conn.address}${conn.type === 'rdp' && conn.port && conn.port !== 3389 ? ':' + conn.port : ''}`;
@@ -373,6 +375,9 @@ function openEmbeddedRdp(conn) {
 }
 
 function teardownRdpSession() {
+  rdpLayoutFocusToken++;
+  window.rdpManager?.rdpLayoutFocus?.(false, rdpLayoutFocusToken);
+  releaseRdpKeys();
   rdpConnectionAttempt++;
   $('rdpConnectBtn').disabled = false;
   const s = rdpSession.session;
@@ -652,16 +657,47 @@ function attachRdpInputOnce() {
     }
   };
 
+  const pressedKeys = new Set();
+  releaseRdpKeys = () => {
+    if (!pressedKeys.size) return;
+    applyTx((tx, DE) => { for (const code of pressedKeys) tx.addEvent(DE.keyReleased(code)); });
+    pressedKeys.clear();
+  };
+  const updateLayoutFocus = () => {
+    const active = Boolean(rdpSession.session && document.activeElement === canvas && document.hasFocus());
+    rdpLayoutFocusToken++;
+    window.rdpManager?.rdpLayoutFocus?.(active, rdpLayoutFocusToken);
+  };
+  canvas.addEventListener('focus', updateLayoutFocus);
+  canvas.addEventListener('blur', () => { updateLayoutFocus(); releaseRdpKeys(); });
+  window.addEventListener('focus', updateLayoutFocus);
+  window.addEventListener('blur', () => { updateLayoutFocus(); releaseRdpKeys(); });
+  window.rdpManager?.onRdpLayoutSwitch?.((token) => {
+    if (token !== rdpLayoutFocusToken || !rdpSession.session || document.activeElement !== canvas || !document.hasFocus()) return;
+    // The OS consumed the second modifier locally. Send a complete, balanced
+    // Alt+Shift chord independently of which modifier was pressed first.
+    applyTx((tx, DE) => {
+      tx.addEvent(DE.keyPressed(0x38));
+      tx.addEvent(DE.keyPressed(0x2a));
+      tx.addEvent(DE.keyReleased(0x2a));
+      tx.addEvent(DE.keyReleased(0x38));
+    });
+    pressedKeys.delete(0x38);
+    pressedKeys.delete(0x2a);
+  });
+
   canvas.addEventListener('keydown', (e) => {
     const scancode = RDP_SCANCODE_MAP[e.code];
     if (scancode == null) return;
     e.preventDefault();
+    pressedKeys.add(scancode);
     applyTx((tx, DE) => tx.addEvent(DE.keyPressed(scancode)));
   });
   canvas.addEventListener('keyup', (e) => {
     const scancode = RDP_SCANCODE_MAP[e.code];
     if (scancode == null) return;
     e.preventDefault();
+    pressedKeys.delete(scancode);
     applyTx((tx, DE) => tx.addEvent(DE.keyReleased(scancode)));
   });
   canvas.addEventListener('mousemove', (e) => {

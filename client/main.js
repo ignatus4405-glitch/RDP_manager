@@ -15,6 +15,7 @@ const { createClipboardFileSource } = require('./clipboard-file-source');
 const { createClipboardReceiver } = require('./rdp-clipboard-receiver');
 const { createRichClipboard } = require('./clipboard-rich');
 const { createWindowsVirtualClipboard } = require('./windows-virtual-clipboard');
+const { createWindowsLayoutHook } = require('./windows-layout-hook');
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -39,6 +40,13 @@ const windowsVirtualClipboard = createWindowsVirtualClipboard({
     if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Окно клиента недоступно.');
     mainWindow.webContents.send('rdp-virtual-read', request);
   },
+});
+const layoutHookExecutable = app.isPackaged ? path.join(process.resourcesPath, 'rdp-layout-hook.exe') : path.join(__dirname, 'build', 'rdp-layout-hook.exe');
+let layoutFocusToken = null;
+const layoutHook = createWindowsLayoutHook({
+  executable: layoutHookExecutable,
+  onSwitch: () => { if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) mainWindow.webContents.send('rdp-layout-switch', layoutFocusToken); },
+  onError: (error) => console.warn('RDP keyboard hook:', error.message),
 });
 const clipboardFileSource = createClipboardFileSource({ clipboard });
 const richClipboard = createRichClipboard({ clipboard, ClipboardItem });
@@ -69,7 +77,8 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  mainWindow.on('closed', () => { mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); windowsVirtualClipboard.clear(); });
+  mainWindow.on('blur', () => { layoutFocusToken = null; layoutHook.stop(); });
+  mainWindow.on('closed', () => { layoutHook.stop(); mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); windowsVirtualClipboard.clear(); });
 }
 
 function createServerManagerWindow() {
@@ -359,6 +368,14 @@ ipcMain.handle('clipboard-write', async (_event, text) => { await clipboard.writ
 function requireClientWindow(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Операция доступна только окну клиента.');
 }
+ipcMain.on('rdp-layout-focus', (event, focused, token) => {
+  requireClientWindow(event);
+  if (!focused || !Number.isSafeInteger(token) || process.platform !== 'win32' || !mainWindow.isFocused() || !fs.existsSync(layoutHookExecutable)) { layoutFocusToken = null; layoutHook.stop(); return; }
+  layoutFocusToken = token;
+  const handle = mainWindow.getNativeWindowHandle();
+  const hwnd = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
+  layoutHook.start(hwnd);
+});
 ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
 ipcMain.handle('rdp-virtual-publish', (event, files) => { requireClientWindow(event); if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.'); return windowsVirtualClipboard.publish(files); });
