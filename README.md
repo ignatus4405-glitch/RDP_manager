@@ -56,7 +56,7 @@ RDP_manager/
 4. Проверьте публикацию командой `gh release view vX.Y.Z`: Windows installer, Linux AppImage, Linux server tar.gz и `latest*.yml` должны быть в Release.
 5. Установленные клиенты проверяют/загружают обновления; Server Manager открывает страницу релиза, откуда пользователь запускает единый установщик с нужным компонентом.
 
-Текущие версии пакетов: `1.4.7`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
+Текущие версии пакетов: `1.4.8`. Подробности — `CONTRIBUTING.md`, `AGENTS.md`, `CHANGELOG.md`.
 
 ## Требования
 
