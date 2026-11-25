@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('rdpManager', {
     write: (id, data) => ipcRenderer.invoke('ssh-write', id, data),
     resize: (id, cols, rows) => ipcRenderer.invoke('ssh-resize', id, cols, rows),
     list: (id, directory) => ipcRenderer.invoke('ssh-list', id, directory),
+    localList: (id, directory) => ipcRenderer.invoke('ssh-local-list', id, directory),
+    transferBetween: (id, local, remote, name, direction) => ipcRenderer.invoke('ssh-transfer-between', id, local, remote, name, direction),
     transfer: (id, remote, direction) => ipcRenderer.invoke('ssh-transfer', id, remote, direction),
     onEvent: (cb) => bindChannel('ssh-event', cb),
   },

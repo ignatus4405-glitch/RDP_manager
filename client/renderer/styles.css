@@ -313,11 +313,40 @@ button { font-family: inherit; cursor: pointer; }
 /* SSH terminal and SFTP file list */
 .conn-type.ssh, .conn-type.sftp { background: #60a5fa22; color: #93c5fd; border: 1px solid #60a5fa44; }
 .ssh-terminal { width: 100%; height: 100%; padding: 12px; background: #000; overflow: hidden; }
-.sftp-panel { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 16px; gap: 12px; overflow: hidden; }
-.sftp-toolbar { display: flex; gap: 8px; align-items: center; }
-.sftp-toolbar input { flex: 1; min-width: 0; }
-.sftp-list { overflow: auto; flex: 1; }
-.sftp-list table { width: 100%; border-collapse: collapse; }
-.sftp-list th, .sftp-list td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.sftp-panel { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: #0d121c; overflow: hidden; }
+.sftp-commandbar { min-height: 62px; display: flex; align-items: center; gap: 20px; padding: 10px 18px; border-bottom: 1px solid #263449; background: #151e2c; }
+.sftp-command-label { color: #e5edf9; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.sftp-command-label small { color: #7ba9fb; font-size: 10px; letter-spacing: .08em; margin-left: 7px; }
+.sftp-command-actions { display: flex; gap: 8px; }
+.sftp-command-actions button { white-space: nowrap; }
+.sftp-command-hint { color: #94a3b8; font-size: 12px; }
+.sftp-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); flex: 1; min-height: 0; }
+.sftp-pane { min-width: 0; display: flex; flex-direction: column; min-height: 0; background: #101722; }
+.sftp-pane + .sftp-pane { border-left: 2px solid #344257; }
+.sftp-pane-title { display: flex; align-items: center; gap: 10px; padding: 12px 16px 9px; }
+.sftp-pane-title strong, .sftp-pane-title small { display: block; }
+.sftp-pane-title strong { font-size: 13px; color: #eef4fd; }
+.sftp-pane-title small { font-size: 11px; color: #92a3bc; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 38vw; }
+.sftp-pane-icon { color: #7db1ff; background: #244064; border-radius: 7px; display: grid; place-items: center; width: 32px; height: 32px; font-size: 18px; }
+.sftp-pane-icon.remote { color: #6ee7c0; background: #17493f; }
+.sftp-toolbar { display: flex; gap: 5px; align-items: center; padding: 0 12px 10px; }
+.sftp-toolbar input { flex: 1; min-width: 0; height: 32px; margin: 0; padding: 5px 9px; font-size: 12px; background: #0b111a; border: 1px solid #344257; border-radius: 5px; }
+.sftp-tool { width: 32px; height: 32px; flex: 0 0 32px; color: #cbd8ea; background: #202c3c; border: 1px solid #35445b; border-radius: 5px; font-size: 17px; cursor: pointer; }
+.sftp-tool:hover { background: #30445d; }
+.sftp-list { overflow: auto; flex: 1; border-top: 1px solid #2b394d; }
+.sftp-list table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.sftp-list th { position: sticky; top: 0; z-index: 1; color: #9eafc4; background: #1b2635; font-weight: 500; text-align: left; }
+.sftp-list th, .sftp-list td { padding: 7px 10px; border-bottom: 1px solid #202b3a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sftp-list th:first-child { width: 52%; } .sftp-list th:nth-child(2) { width: 20%; }
+.sftp-list tbody tr { cursor: default; color: #d9e3f1; }
+.sftp-list tbody tr:hover { background: #1d2b3e; }
+.sftp-list tbody tr.selected { background: #254e7e; color: #fff; }
+.sftp-list tbody tr:focus-visible { outline: 2px solid #80b6ff; outline-offset: -2px; }
+.sftp-entry-icon { display: inline-block; width: 23px; }
+.sftp-empty { color: #8090a5; padding: 32px 16px; text-align: center; font-size: 13px; }
+.sftp-summary { padding: 8px 12px; color: #9baec5; font-size: 11px; border-top: 1px solid #2b394d; }
+.sftp-footer { min-height: 36px; display: flex; align-items: center; gap: 12px; padding: 7px 16px; background: #182334; border-top: 1px solid #344257; color: #aabbd1; font-size: 11px; }
+.sftp-footer span:first-child { flex: 1; } .sftp-footer progress { width: 180px; height: 8px; accent-color: #6ca8ff; }
+@media (max-width: 700px) { .sftp-command-hint { display: none; } .sftp-pane-title small { max-width: 30vw; } }
 
 .conn-type.web { background: #a78bfa22; color: #c4b5fd; border: 1px solid #a78bfa44; }

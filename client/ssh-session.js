@@ -2,11 +2,12 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const { Client } = require('ssh2');
 
 // SSH runs in the Electron main process, never in the remote site's context.
 // The user confirms the server key before any password is sent.
-function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, makeClient = () => new Client() }) {
+function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, localStart = os.homedir(), makeClient = () => new Client() }) {
   let current = null;
   function send(state, type, extra = {}) { if (state === current) emit({ id: state.id, type, ...extra }); }
   function close(id) {
@@ -82,7 +83,62 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
     const files = await new Promise((resolve, reject) => state.sftp.readdir(realpath, (err, value) => err ? reject(err) : resolve(value)));
     if (current !== state) throw new Error('SSH-сеанс закрыт.');
     if (files.length > 10000) throw new Error('Слишком много файлов в каталоге.');
-    return { path: realpath, files: files.filter((x) => x.filename !== '.' && x.filename !== '..').map((x) => ({ name: x.filename, directory: x.attrs.isDirectory(), size: x.attrs.size, modified: x.attrs.mtime })) };
+    return { path: realpath, files: files.filter((x) => x.filename !== '.' && x.filename !== '..').map((x) => ({ name: x.filename, directory: x.attrs.isDirectory(), file: x.attrs.isFile(), link: x.attrs.isSymbolicLink(), size: x.attrs.size, modified: x.attrs.mtime })) };
+  }
+  function validName(name, forWindows = false) {
+    if (typeof name !== 'string' || !name || name === '.' || name === '..' || name.length > 255 || /[\\/\x00-\x1f\x7f]/.test(name)) throw new Error('Недопустимое имя файла.');
+    if (forWindows && (/[<>:"|?*]/.test(name) || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name))) throw new Error('Имя файла не поддерживается Windows.');
+    return name;
+  }
+  async function localList(id, directory) {
+    const state = get(id, 'sftp');
+    const requested = directory == null ? localStart : validPath(directory);
+    if (!path.isAbsolute(requested)) throw new Error('Укажите абсолютный локальный путь.');
+    const realpath = await fs.realpath(requested);
+    const entries = await fs.readdir(realpath, { withFileTypes: true });
+    if (entries.length > 10000) throw new Error('Слишком много файлов в каталоге.');
+    const files = await Promise.all(entries.map(async (entry) => {
+      try {
+        const stat = await fs.lstat(path.join(realpath, entry.name));
+        return { name: entry.name, directory: stat.isDirectory(), file: stat.isFile(), link: stat.isSymbolicLink(), size: stat.size, modified: Math.floor(stat.mtimeMs / 1000) };
+      } catch { return null; }
+    }));
+    if (current !== state) throw new Error('SSH-сеанс закрыт.');
+    return { path: realpath, parent: path.dirname(realpath), files: files.filter(Boolean) };
+  }
+  async function transferBetween(id, localDirectory, remoteDirectory, name, direction) {
+    const state = get(id, 'sftp');
+    validPath(localDirectory); validPath(remoteDirectory); validName(name, direction === 'download' && process.platform === 'win32');
+    if (!path.isAbsolute(localDirectory) || !remoteDirectory.startsWith('/')) throw new Error('Укажите абсолютные пути каталогов.');
+    if (!['upload', 'download'].includes(direction)) throw new Error('Неизвестное направление передачи.');
+    if (state.busy) throw new Error('Другая передача ещё выполняется.');
+    state.busy = true; let tmp = null;
+    const ensureOpen = () => { if (current !== state) throw new Error('SSH-сеанс закрыт.'); };
+    try {
+      const local = path.join(localDirectory, name); const remote = path.posix.join(remoteDirectory, name);
+      const remoteStat = (target) => new Promise((resolve, reject) => state.sftp.lstat(target, (err, attrs) => err ? (err.code === 2 ? resolve(null) : reject(err)) : resolve(attrs)));
+      const localStat = async (target) => { try { return await fs.lstat(target); } catch (err) { if (err.code === 'ENOENT') return null; throw err; } };
+      if (direction === 'upload') {
+        const source = await localStat(local); if (!source?.isFile()) throw new Error('Выберите обычный локальный файл.');
+        const dest = await remoteStat(remote); ensureOpen();
+        if (dest && !dest.isFile()) throw new Error('На сервере уже существует не обычный файл с таким именем.');
+        if (dest && !await confirmOverwrite(remote, 'remote')) return { cancelled: true };
+        ensureOpen();
+        await new Promise((resolve, reject) => state.sftp.fastPut(local, remote, { step: (done, _chunk, total) => send(state, 'progress', { done, total, direction }) }, (err) => err ? reject(err) : resolve()));
+      } else {
+        const source = await remoteStat(remote); if (!source?.isFile()) throw new Error('Выберите обычный файл на сервере.');
+        const dest = await localStat(local); ensureOpen();
+        if (dest && !dest.isFile()) throw new Error('Локально уже существует не обычный файл с таким именем.');
+        if (dest && !await confirmOverwrite(local, 'local')) return { cancelled: true };
+        ensureOpen();
+        tmp = path.join(localDirectory, `.${crypto.randomUUID()}.sftp-part`);
+        await new Promise((resolve, reject) => state.sftp.fastGet(remote, tmp, { step: (done, _chunk, total) => send(state, 'progress', { done, total, direction }) }, (err) => err ? reject(err) : resolve()));
+        ensureOpen();
+        // Do not overwrite a file that appeared after the confirmation check.
+        if (!dest) await fs.link(tmp, local); else { const latest = await localStat(local); if (!latest?.isFile() || latest.ino !== dest.ino || latest.dev !== dest.dev || latest.mtimeMs !== dest.mtimeMs || latest.size !== dest.size) throw new Error('Локальный файл изменился во время передачи.'); await fs.rename(tmp, local); tmp = null; }
+      }
+      return { ok: true };
+    } finally { state.busy = false; if (tmp) await fs.rm(tmp, { force: true }).catch(() => {}); }
   }
   async function transfer(id, remote, direction) {
     const state = get(id, 'sftp'); validPath(remote);
@@ -112,6 +168,6 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
       return { ok: true };
     } finally { state.busy = false; if (tmp) await fs.rm(tmp, { force: true }).catch(() => {}); }
   }
-  return { open, close, write, resize, list, transfer };
+  return { open, close, write, resize, list, localList, transfer, transferBetween };
 }
 module.exports = { createSshSession };

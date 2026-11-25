@@ -255,9 +255,27 @@
       <p id="sshError" class="login-error"></p><button id="sshConnect" type="submit" class="btn-primary big">Подключиться</button>
     </form>
     <div id="sshTerminal" class="ssh-terminal hidden"></div>
-    <section id="sftpPanel" class="sftp-panel hidden">
-      <div class="sftp-toolbar"><button id="sftpUp" class="btn-ghost">↑</button><input id="sftpPath" aria-label="Удалённый путь" /><button id="sftpGo" class="btn-ghost">Открыть</button><button id="sftpUpload" class="btn-primary">Загрузить файл</button></div>
-      <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер, байт</th><th></th></tr></thead><tbody id="sftpEntries"></tbody></table></div>
+    <section id="sftpPanel" class="sftp-panel hidden" aria-label="Файловый менеджер SFTP">
+      <div class="sftp-commandbar">
+        <span class="sftp-command-label">Файловый менеджер <small>SFTP</small></span>
+        <div class="sftp-command-actions"><button id="sftpUpload" class="btn-ghost" disabled>Отправить →</button><button id="sftpDownload" class="btn-ghost" disabled>← Получить</button></div>
+        <span class="sftp-command-hint">Выберите файл и нажмите кнопку передачи</span>
+      </div>
+      <div class="sftp-panes">
+        <section class="sftp-pane" aria-label="Локальные файлы">
+          <div class="sftp-pane-title"><span class="sftp-pane-icon">▣</span><div><strong>Этот компьютер</strong><small>Локальные файлы</small></div></div>
+          <div class="sftp-toolbar"><button id="sftpLocalUp" class="sftp-tool" title="Вверх" aria-label="Локально: на уровень вверх">↑</button><button id="sftpLocalRefresh" class="sftp-tool" title="Обновить" aria-label="Обновить локальный каталог">↻</button><input id="sftpLocalPath" aria-label="Локальный путь" spellcheck="false" /><button id="sftpLocalGo" class="sftp-tool" title="Открыть путь" aria-label="Открыть локальный путь">→</button></div>
+          <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpLocalEntries"></tbody></table><div id="sftpLocalEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
+          <div id="sftpLocalSummary" class="sftp-summary">Локальный каталог</div>
+        </section>
+        <section class="sftp-pane" aria-label="Файлы на сервере">
+          <div class="sftp-pane-title"><span class="sftp-pane-icon remote">▤</span><div><strong>Удалённый сервер</strong><small id="sftpRemoteHost">SFTP</small></div></div>
+          <div class="sftp-toolbar"><button id="sftpUp" class="sftp-tool" title="Вверх" aria-label="На сервере: на уровень вверх">↑</button><button id="sftpRefresh" class="sftp-tool" title="Обновить" aria-label="Обновить удалённый каталог">↻</button><input id="sftpPath" aria-label="Удалённый путь" spellcheck="false" /><button id="sftpGo" class="sftp-tool" title="Открыть путь" aria-label="Открыть удалённый путь">→</button></div>
+          <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpEntries"></tbody></table><div id="sftpRemoteEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
+          <div id="sftpRemoteSummary" class="sftp-summary">Удалённый каталог</div>
+        </section>
+      </div>
+      <div class="sftp-footer"><span id="sftpMessage">Подключение…</span><progress id="sftpProgress" class="hidden" max="100" value="0"></progress><span>Передача отдельных файлов</span></div>
     </section>
   </div>
 </div>
