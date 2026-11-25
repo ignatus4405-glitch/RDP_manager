@@ -112,6 +112,7 @@ async function doLogin() {
 }
 
 function logout() {
+  window.closeEmbeddedRustDesk?.();
   state.token = null; state.user = null;
   sessionStorage.removeItem('rdp_token');
   $('appView').classList.add('hidden');
@@ -954,6 +955,10 @@ $('rdpExternalBtn').addEventListener('click', () => {
 async function launchConnection(conn, btn) {
   if (conn.type === 'rdp') {
     openEmbeddedRdp(conn);
+    return;
+  }
+  if (conn.type === 'rustdesk') {
+    window.openEmbeddedRustDesk(conn);
     return;
   }
   if (window.rdpManager?.launch) {
