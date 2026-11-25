@@ -68,7 +68,7 @@
       const name = (file.path ? `${file.path}\\` : '') + file.name;
       if (!name || name.length >= 260 || name.includes('\0') || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error('Некорректное имя или размер файла.');
       const off = 4 + i * 592;
-      view.setUint32(off, 0x44, true); // FD_ATTRIBUTES | FD_FILESIZE
+      view.setUint32(off, 0x80004044, true); // FD_UNICODE | FD_PROGRESSUI | FD_ATTRIBUTES | FD_FILESIZE
       view.setUint32(off + 36, file.isDirectory ? 0x10 : 0x80, true);
       view.setUint32(off + 64, Math.floor(file.size / 0x100000000), true);
       view.setUint32(off + 68, file.size >>> 0, true);

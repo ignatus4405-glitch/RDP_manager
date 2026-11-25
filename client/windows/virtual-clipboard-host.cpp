@@ -1,5 +1,6 @@
 #include "virtual-clipboard.h"
 #include <windows.h>
+#include <shobjidl.h>
 #include <wincrypt.h>
 #include <algorithm>
 #include <cstring>
@@ -38,8 +39,9 @@ bool readFile(rdp_clipboard::File& result) {
 int main() {
     std::string line;
     if (!std::getline(std::cin, line)) return 2;
-    size_t count = 0; std::istringstream input(line);
+    size_t count = 0; int asyncMode = 0; std::istringstream input(line);
     if (!(input >> count) || !count || count > 1000000) return 2;
+    if (input >> asyncMode) { if (asyncMode != 0 && asyncMode != 1) return 2; }
     std::vector<rdp_clipboard::File> files(count);
     for (auto& file : files) if (!readFile(file)) return 2;
     if (FAILED(OleInitialize(nullptr))) return 3;
@@ -57,7 +59,7 @@ int main() {
         *received = static_cast<ULONG>(data.size());
         return S_OK;
     };
-    HRESULT hr = rdp_clipboard::CreateVirtualFiles(files, reader, &object);
+    HRESULT hr = rdp_clipboard::CreateVirtualFiles(files, reader, &object, asyncMode != 0);
     if (SUCCEEDED(hr)) hr = OleSetClipboard(object);
     if (FAILED(hr)) { if (object) object->Release(); OleUninitialize(); return 4; }
     std::cout << "READY" << std::endl;
@@ -67,7 +69,17 @@ int main() {
     if (!timer) { OleSetClipboard(nullptr); object->Release(); OleUninitialize(); return 5; }
     MSG message;
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-        if (message.message == WM_TIMER && OleIsCurrentClipboard(object) != S_OK) break;
+        if (message.message == WM_TIMER && OleIsCurrentClipboard(object) != S_OK) {
+            // A background paste may still be reading this object after the
+            // clipboard changes; keep its provider alive until it finishes.
+            IDataObjectAsyncCapability* async = nullptr;
+            BOOL inOperation = FALSE;
+            if (SUCCEEDED(object->QueryInterface(__uuidof(IDataObjectAsyncCapability), reinterpret_cast<void**>(&async)))) {
+                async->InOperation(&inOperation);
+                async->Release();
+            }
+            if (!inOperation) break;
+        }
         TranslateMessage(&message); DispatchMessageW(&message);
     }
     KillTimer(nullptr, timer);

@@ -378,13 +378,13 @@ ipcMain.on('rdp-layout-focus', (event, focused, token) => {
 });
 ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
-ipcMain.handle('rdp-virtual-publish', async (event, files, expectedFingerprint) => {
+ipcMain.handle('rdp-virtual-publish', async (event, files, expectedFingerprint, asyncMode) => {
   requireClientWindow(event);
   if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.');
   if (expectedFingerprint !== undefined) {
     if (typeof expectedFingerprint !== 'string' || windowsVirtualClipboard.isActive() || await clipboardFingerprint(clipboard) !== expectedFingerprint) throw new Error('Локальный буфер изменился; удалённые файлы не опубликованы.');
   }
-  return windowsVirtualClipboard.publish(files);
+  return windowsVirtualClipboard.publish(files, { asyncMode: asyncMode === true });
 });
 ipcMain.handle('rdp-clipboard-fingerprint', async (event) => {
   requireClientWindow(event);

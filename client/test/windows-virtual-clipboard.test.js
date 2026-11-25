@@ -67,3 +67,15 @@ test('cleanup of an old OLE offer cannot kill a new session host', async () => {
   assert.equal(hosts[1].killed, true);
   assert.equal(bridge.isActive(), false);
 });
+
+test('async OLE mode is opt-in and is forwarded to the native host', async () => {
+  const hosts = [];
+  const bridge = createWindowsVirtualClipboard({ executable: 'helper.exe', sendRequest() {}, spawnProcess: () => { const child = makeHost(); hosts.push(child); return child; } });
+  const publishing = bridge.publish([{ name: 'remote.txt', size: 1 }], { asyncMode: true });
+  let input = ''; hosts[0].stdin.on('data', (data) => { input += data.toString(); });
+  hosts[0].stdout.write('READY\n');
+  const token = await publishing;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(input, /^1 1\n/);
+  bridge.clear(token);
+});

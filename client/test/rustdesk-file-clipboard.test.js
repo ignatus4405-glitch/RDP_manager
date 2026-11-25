@@ -9,6 +9,11 @@ test('RustDesk clipboard wire fields and Windows file descriptors round trip', (
   const files = [ { name: 'Папка', size: 0, isDirectory: true }, { name: 'данные.txt', path: 'Папка', size: 0x100000005, isDirectory: false } ];
   const descriptors = protocol.encodeDescriptors(files);
   assert.equal(descriptors.length, 4 + 2 * 592);
+  const view = new DataView(descriptors.buffer, descriptors.byteOffset, descriptors.byteLength);
+  for (const offset of [4, 4 + 592]) {
+    assert.equal(view.getUint32(offset, true) & 0x4000, 0x4000, 'request the Shell progress UI');
+    assert.equal(view.getUint32(offset, true) >>> 31, 1, 'descriptors are Unicode');
+  }
   assert.deepEqual(protocol.decodeDescriptors(descriptors), files.map((f) => ({ ...f, path: f.path })));
   const request = { streamId: 77, index: 1, flags: 2, positionLow: -1, positionHigh: 2, size: 5, haveClipDataId: 1, clipDataId: -123 };
   assert.deepEqual(protocol.decode(protocol.encode('fileContentsRequest', request)), { kind: 'fileContentsRequest', value: { ...request, haveClipDataId: true } });
@@ -19,19 +24,19 @@ test('RustDesk clipboard wire fields and Windows file descriptors round trip', (
 
 function harness() {
   let files = null, isVirtual = false, readHandler, currentToken = 0;
-  const sent = [], responses = [], published = [], errors = [];
+  const sent = [], responses = [], published = [], errors = [], publishOptions = [];
   const bridge = {
     onVirtualRead(fn) { readHandler = fn; return () => { readHandler = null; }; },
     async virtualActive() { return isVirtual; },
     async clipboardFiles() { const result = files; if (files && !files.unchanged) files = { unchanged: true }; return result; },
     async readClipboardFile(_id, pos, size) { return Uint8Array.from([1, 2, 3, 4].slice(pos, pos + size)); },
-    async virtualPublish(entries) { published.push(entries); isVirtual = true; return String(++currentToken); },
+    async virtualPublish(entries, fingerprint, asyncMode) { published.push(entries); publishOptions.push({ fingerprint, asyncMode }); isVirtual = true; return String(++currentToken); },
     async clipboardFingerprint() { return 'baseline'; },
     async virtualActivate() {}, async virtualClear() { isVirtual = false; },
     async virtualRespond(response) { responses.push(response); }, async resetClipboardFiles() {},
   };
   const sync = createRustDeskFileClipboard({ protocol, bridge, send: (bytes) => sent.push(protocol.decode(bytes)), canSend: () => true, setTimer: () => 1, clearTimer: () => {}, onError: (e) => errors.push(e) });
-  return { sync, sent, published, responses, errors, setFiles: (x) => { files = x; }, remote: (kind, value) => sync.receive(protocol.encode(kind, value)), read: (r) => readHandler(r) };
+  return { sync, sent, published, publishOptions, responses, errors, setFiles: (x) => { files = x; }, remote: (kind, value) => sync.receive(protocol.encode(kind, value)), read: (r) => readHandler(r) };
 }
 
 test('local copied files are offered and bytes are served only on request', async () => {
@@ -54,6 +59,7 @@ test('remote files are published as OLE metadata and downloaded only on paste re
   const descriptors = protocol.encodeDescriptors([{ name: 'report.txt', size: 4, isDirectory: false }]);
   h.remote('formatDataResponse', { flags: 1, data: descriptors }); await tick();
   assert.equal(h.published[0][0].name, 'report.txt');
+  assert.deepEqual(h.publishOptions[0], { fingerprint: 'baseline', asyncMode: true });
   assert.equal(h.sent.filter((x) => x.kind === 'fileContentsRequest').length, 0);
   const read = h.read({ token: '1', requestId: 'r', index: 0, position: 1, size: 2 });
   const req = h.sent.at(-1); assert.equal(req.kind, 'fileContentsRequest');

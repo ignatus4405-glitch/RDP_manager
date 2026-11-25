@@ -20,6 +20,6 @@ using Read = std::function<HRESULT(size_t index, unsigned long long offset,
 // Construct a COM data object exposing CFSTR_FILEDESCRIPTORW and
 // CFSTR_FILECONTENTS as IStream. Caller owns the returned reference. The
 // caller is responsible for the OLE apartment and clipboard ownership.
-HRESULT CreateVirtualFiles(const std::vector<File>& files, Read read, IDataObject** object);
+HRESULT CreateVirtualFiles(const std::vector<File>& files, Read read, IDataObject** object, bool asyncMode = false);
 }
 #endif
