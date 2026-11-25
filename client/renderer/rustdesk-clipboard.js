@@ -37,6 +37,7 @@
         if (active && revision === generation) { writing = false; void poll(); }
       });
     }
+    function invalidate() { generation++; polling = false; writing = false; lastText = null; }
     function start() {
       if (active) return;
       active = true;
@@ -49,7 +50,7 @@
       if (timer !== null) clearTimer(timer);
       timer = null;
     }
-    return { start, stop, poll, remote };
+    return { start, stop, poll, remote, invalidate };
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { createRustDeskClipboardSync };
   if (root) root.createRustDeskClipboardSync = createRustDeskClipboardSync;

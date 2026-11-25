@@ -232,8 +232,6 @@
     <form id="rustdeskForm" class="rdp-connect-form">
       <h3>Встроенный RustDesk</h3>
       <p class="muted tiny">Экспериментальная версия. Подключение напрямую по WS без TLS: метаданные соединения видимы сети. Проверка публичного ключа обязательна. Системная вставка файлов пока не поддерживается.</p>
-      <label for="rustdeskServer">Сервер ID</label><input id="rustdeskServer" required placeholder="IP или имя сервера" autocomplete="off" />
-      <label for="rustdeskKey">Публичный ключ сервера</label><input id="rustdeskKey" required placeholder="id_ed25519.pub" autocomplete="off" spellcheck="false" />
       <label for="rustdeskPassword">Пароль удалённого устройства</label><input id="rustdeskPassword" type="password" autocomplete="off" />
       <p id="rustdeskError" class="login-error"></p><button id="rustdeskConnect" type="submit" class="btn-primary big">Подключиться</button>
     </form>
@@ -249,6 +247,8 @@
 <script src="rustdesk-config.js"></script>
 <script src="vendor/rustdesk/bundle.js"></script>
 <script src="rustdesk-clipboard.js"></script>
+<script src="rustdesk-file-protocol.js"></script>
+<script src="rustdesk-file-clipboard.js"></script>
 <script src="rustdesk.js"></script>
 <script src="app.js"></script>
 </body>

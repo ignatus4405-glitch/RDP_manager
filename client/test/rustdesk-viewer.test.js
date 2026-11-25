@@ -34,9 +34,7 @@ function setup(protocol = 'file:') {
   const context = { window, document: { getElementById: element, createElement: () => ({}) }, localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) }, VideoDecoder: function () {}, EncodedVideoChunk: function () {}, console };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/rustdesk.js'), 'utf8'), context);
-  window.openEmbeddedRustDesk({ address: '123 456', name: 'test' });
-  element('rustdeskServer').value = '37.17.55.196';
-  element('rustdeskKey').value = Buffer.alloc(32, 42).toString('base64');
+  window.openEmbeddedRustDesk({ address: '123 456', name: 'test', rustdesk_server: '37.17.55.196', rustdesk_key: Buffer.alloc(32, 42).toString('base64') });
   return { element, sessions, store, window };
 }
 
@@ -44,6 +42,7 @@ test('desktop launches a verified direct RustDesk attempt without saving the pas
   const h = setup();
   h.element('rustdeskPassword').value = 'secret';
   void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  await Promise.resolve();
   const session = h.sessions[0];
   assert.equal(session.options.peerId, '123456');
   assert.equal(session.options.server.rendezvousUrl, 'ws://37.17.55.196:21118/');
@@ -70,9 +69,10 @@ test('does not open insecure WebSockets in the browser', () => {
 });
 
 
-test('monitor selector follows remote screen changes and is cleared on disconnect', () => {
+test('monitor selector follows remote screen changes and is cleared on disconnect', async () => {
   const h = setup();
   void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  await Promise.resolve();
   const session = h.sessions[0];
   session.peer = { displays: [{ name: 'Main', online: true }, { name: 'Second', online: true }], currentDisplay: 0 };
   session.handlers.connected({});
@@ -87,4 +87,19 @@ test('monitor selector follows remote screen changes and is cleared on disconnec
   h.window.closeEmbeddedRustDesk();
   assert.equal(select.classList.contains('hidden'), true);
   assert.equal(select.children.length, 0);
+});
+
+test('per-connection configuration takes precedence, old cards retain local fallback', async () => {
+  const h = setup();
+  const key = Buffer.alloc(32, 42).toString('base64');
+  h.store.set('rustdesk_server', 'legacy.example');
+  h.store.set('rustdesk_public_key', key);
+  h.window.openEmbeddedRustDesk({ address: '123', rustdesk_server: 'new.example', rustdesk_key: key });
+  void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  await Promise.resolve();
+  assert.equal(h.sessions.at(-1).options.server.rendezvousUrl, 'ws://new.example:21118/');
+  h.window.openEmbeddedRustDesk({ address: '456', rustdesk_server: '', rustdesk_key: '' });
+  void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  await Promise.resolve();
+  assert.equal(h.sessions.at(-1).options.server.rendezvousUrl, 'ws://legacy.example:21118/');
 });

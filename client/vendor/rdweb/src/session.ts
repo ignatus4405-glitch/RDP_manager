@@ -3,6 +3,7 @@
 // the media/input message loop.
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
+import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 import {
   BackNotification_BlockInputState as BlockState,
   BackNotification_PrivacyModeState as PrivacyState,
@@ -78,6 +79,7 @@ interface Modifiers {
 export class Session {
   readonly peerId: string;
   private settingsValue: SessionSettings;
+  private readonly fileClipboard: boolean;
   private readonly events = new Emitter<SessionEventMap>();
   private stateValue: SessionState = "idle";
   private abort = new AbortController();
@@ -130,6 +132,7 @@ export class Session {
     this.peerId = opts.peerId.replace(/\s+/g, "");
     if (!this.peerId) throw new SessionError("peer id is empty", "bad-config");
     this.settingsValue = { ...DEFAULT_SETTINGS, ...opts.settings };
+    this.fileClipboard = Boolean(opts.fileClipboard);
     // fail early on a missing/bad key: we never connect unauthenticated
     parseServerKey(opts.server.key);
     this.rendezvousUrl = opts.server.rendezvousUrl;
@@ -143,6 +146,7 @@ export class Session {
         approvalTimeoutMs: opts.approvalTimeoutMs,
         myName: opts.myName,
         myId: opts.myId,
+        myPlatform: this.fileClipboard ? "Windows" : undefined,
         clientVersion: opts.clientVersion,
         loginExtras: () => ({ videoAckRequired: true, option: this.loginOptions(this.settingsValue) }),
       },
@@ -351,6 +355,11 @@ export class Session {
   }
 
   /** Puts text on the remote clipboard. */
+  sendFileClipboard(data: Uint8Array): void {
+    if (!this.fileClipboard || !this.canControl || !this.permissions.clipboard || !this.permissions.file || data.length > 8 * 1024 * 1024) return;
+    this.link.sendRawMessage(new BinaryWriter().tag(20, 2).bytes(data).finish());
+  }
+
   sendClipboard(text: string): void {
     if (!this.canControl || this.settingsValue.disableClipboard || !this.permissions.clipboard) return;
     const content = new TextEncoder().encode(text);
@@ -534,6 +543,14 @@ export class Session {
   }
 
   private onMessage(msg: Message): void {
+    if (this.fileClipboard && this.canControl && this.permissions.clipboard && this.permissions.file) {
+      for (const field of msg.$unknown ?? []) {
+        if (field.no === 20 && field.wireType === 2 && field.data.length <= 8 * 1024 * 1024) {
+          const data = new BinaryReader(field.data).bytes();
+          this.events.emit("fileClipboard", { data });
+        }
+      }
+    }
     const u = msg.union;
     switch (u.case) {
       case "testDelay":
@@ -870,6 +887,7 @@ export class Session {
     const opt: OptInit = {
       ...this.qualityOptions(s, true),
       supportedDecoding: this.supportedDecoding(s),
+      ...(this.fileClipboard && !s.viewOnly && !s.disableClipboard ? { enableFileTransfer: BoolOption.Yes } : {}),
     };
     if (s.viewOnly) {
       opt.disableKeyboard = yes;

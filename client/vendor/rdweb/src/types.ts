@@ -84,6 +84,8 @@ export interface SessionOptions {
   /** Our id as shown on the remote side; defaults to a web-specific marker. */
   myId?: string;
   settings?: Partial<SessionSettings>;
+  /** Experimental desktop file clipboard, requiring a native clipboard provider. */
+  fileClipboard?: boolean;
   /** Version string announced to the peer (affects which features it uses). */
   clientVersion?: string;
 }
@@ -190,6 +192,7 @@ export interface SessionEventMap {
   cursorShape: { id: string };
   cursorPosition: { x: number; y: number };
   clipboard: { text: string };
+  fileClipboard: { data: Uint8Array };
   permission: { name: PermissionName; enabled: boolean };
   message: { type: string; title: string; text: string; link: string };
   chat: { text: string };

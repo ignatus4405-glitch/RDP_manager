@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld('rdpManager', {
   fileTransfer: {
     virtualAvailable: () => ipcRenderer.invoke('rdp-virtual-available'),
     virtualActive: () => ipcRenderer.invoke('rdp-virtual-active'),
-    virtualPublish: (files) => ipcRenderer.invoke('rdp-virtual-publish', files),
+    virtualPublish: (files, fingerprint) => ipcRenderer.invoke('rdp-virtual-publish', files, fingerprint),
+    clipboardFingerprint: () => ipcRenderer.invoke('rdp-clipboard-fingerprint'),
     virtualActivate: (token) => ipcRenderer.invoke('rdp-virtual-activate', token),
     virtualClear: (token) => ipcRenderer.invoke('rdp-virtual-clear', token),
     virtualRespond: (response) => ipcRenderer.invoke('rdp-virtual-response', response),

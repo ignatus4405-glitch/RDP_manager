@@ -17,6 +17,8 @@ export type InputMode = "mouse" | "trackpad" | "touch";
 export interface ViewerOptions {
   /** The host handles remote clipboard updates itself. */
   handleRemoteClipboard?: boolean;
+  /** Prepare native file clipboard before forwarding a paste shortcut. */
+  prepareFilePaste?: () => Promise<boolean>;
   scaleMode?: ScaleMode;
   /** Defaults to "trackpad" on touch-first devices and "mouse" otherwise. */
   inputMode?: InputMode;
@@ -89,6 +91,7 @@ export class Viewer {
   private inputMode: InputMode;
   private zoomCursor: boolean;
   private trackpadSpeed: number;
+  private readonly prepareFilePaste?: () => Promise<boolean>;
 
   private pending: VideoFrame | null = null;
   private raf = 0;
@@ -129,6 +132,7 @@ export class Viewer {
     opts: ViewerOptions = {},
   ) {
     injectStyle();
+    this.prepareFilePaste = opts.prepareFilePaste;
     this.scaleMode = opts.scaleMode ?? "fit";
     this.inputMode = opts.inputMode ?? (isTouchFirst() ? "trackpad" : "mouse");
     this.zoomCursor = opts.zoomCursor ?? false;
@@ -934,6 +938,13 @@ export class Viewer {
 
   private onPaste(e: ClipboardEvent): void {
     e.preventDefault();
+    if (this.prepareFilePaste && this.pendingPaste) {
+      const text = e.clipboardData?.files.length ? "" : (e.clipboardData?.getData("text/plain") ?? "");
+      clearTimeout(this.pendingPaste.timer);
+      void this.prepareFilePaste().catch((error) => { console.warn("rdweb: file clipboard", error); return false; }).then((files) => this.endPaste(files ? "" : text));
+      this.ime.value = "";
+      return;
+    }
     if (e.clipboardData?.files.length) {
       // files: offered for upload instead of pasting remotely
       if (this.pendingPaste) {

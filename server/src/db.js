@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
 `);
 
+// Existing databases predate per-connection RustDesk configuration.
+const connectionColumns = new Set(db.prepare('PRAGMA table_info(connections)').all().map((column) => column.name));
+for (const name of ['rustdesk_server', 'rustdesk_key']) {
+  if (!connectionColumns.has(name)) db.exec(`ALTER TABLE connections ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
+}
+
 /* ---------- Хеширование паролей (scrypt) ---------- */
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);

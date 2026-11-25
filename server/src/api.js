@@ -171,8 +171,8 @@ router.post('/connections', requireAuth, requireAdmin, (req, res) => {
   const data = validateConnection(req.body);
   if (data.error) return res.status(400).json({ error: data.error });
   const info = db.prepare(
-    `INSERT INTO connections (type, name, address, port, category, tags, username, description, created_by)
-     VALUES (@type, @name, @address, @port, @category, @tags, @username, @description, @created_by)`
+    `INSERT INTO connections (type, name, address, port, category, tags, username, description, rustdesk_server, rustdesk_key, created_by)
+     VALUES (@type, @name, @address, @port, @category, @tags, @username, @description, @rustdesk_server, @rustdesk_key, @created_by)`
   ).run({ ...data.value, created_by: req.user.id });
   const row = db.prepare('SELECT * FROM connections WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ connection: row });
@@ -186,7 +186,7 @@ router.put('/connections/:id', requireAuth, requireAdmin, (req, res) => {
   if (data.error) return res.status(400).json({ error: data.error });
   db.prepare(
     `UPDATE connections SET type=@type, name=@name, address=@address, port=@port, category=@category,
-       tags=@tags, username=@username, description=@description, updated_at = datetime('now')
+       tags=@tags, username=@username, description=@description, rustdesk_server=@rustdesk_server, rustdesk_key=@rustdesk_key, updated_at = datetime('now')
      WHERE id = @id`
   ).run({ ...data.value, id });
   const row = db.prepare('SELECT * FROM connections WHERE id = ?').get(id);
@@ -224,6 +224,16 @@ function validateConnection(body) {
   if (type !== 'rdp') port = null; // у AnyDesk / RustDesk порт не используется
   if (type === 'rdp' && port === null) port = 3389;
 
+  const rustdesk_server = type === 'rustdesk' ? clean(body.rustdesk_server, 300) : '';
+  const rustdesk_key = type === 'rustdesk' ? clean(body.rustdesk_key, 128) : '';
+  if (Boolean(rustdesk_server) !== Boolean(rustdesk_key)) return { error: 'Укажите сервер ID и публичный ключ RustDesk вместе.' };
+  if (rustdesk_server) {
+    let server;
+    try { server = new URL(`http://${rustdesk_server}`); } catch { return { error: 'Некорректный сервер ID RustDesk.' }; }
+    if (/[\\/?#@\s]/.test(rustdesk_server) || !server.hostname || Number(server.port || 21116) > 65532) return { error: 'Некорректный сервер ID RustDesk.' };
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(rustdesk_key) || Buffer.from(rustdesk_key, 'base64').length !== 32 || Buffer.from(rustdesk_key, 'base64').toString('base64') !== rustdesk_key) return { error: 'Укажите публичный ключ RustDesk id_ed25519.pub.' };
+  }
+
   return {
     value: {
       type,
@@ -234,6 +244,8 @@ function validateConnection(body) {
       tags: normalizeTags(body.tags),
       username: clean(body.username, 150),
       description: clean(body.description, 2000),
+      rustdesk_server,
+      rustdesk_key,
     },
   };
 }

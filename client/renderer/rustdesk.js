@@ -4,12 +4,15 @@
   const $r = (id) => document.getElementById(id);
   let attempt = 0;
   let peerId = '';
+  let serverAddress = '';
+  let publicKey = '';
   let session = null;
   let viewer = null;
   let credential = null;
   let prompted = false;
   let initialPassword = '';
   let clipboardSync = null;
+  let fileClipboard = null;
 
   function status(text, kind = 'idle') {
     $r('rustdeskStatus').textContent = text;
@@ -22,6 +25,8 @@
     $r('rustdeskPassword').value = '';
     clipboardSync?.stop();
     clipboardSync = null;
+    fileClipboard?.stop();
+    fileClipboard = null;
     $r('rustdeskDisplay').replaceChildren();
     $r('rustdeskDisplay').classList.add('hidden');
     $r('rustdeskDisplayLabel').classList.add('hidden');
@@ -67,8 +72,6 @@
     prompted = true;
     $r('rustdeskForm').classList.remove('hidden');
     $r('rustdeskViewer').classList.add('hidden');
-    $r('rustdeskServer').disabled = true;
-    $r('rustdeskKey').disabled = true;
     $r('rustdeskPassword').value = '';
     $r('rustdeskPassword').placeholder = kind === 'twoFactor' ? 'Код двухфакторной проверки' : 'Пароль удалённого устройства';
     $r('rustdeskError').textContent = wrong ? 'Неверные данные, попробуйте снова.' : (kind === 'twoFactor' ? 'Введите код двухфакторной проверки.' : 'Введите пароль удалённого устройства.');
@@ -77,8 +80,6 @@
     $r('rustdeskPassword').focus();
   }
   function resetForm() {
-    $r('rustdeskServer').disabled = false;
-    $r('rustdeskKey').disabled = false;
     $r('rustdeskConnect').textContent = 'Подключиться';
     $r('rustdeskPassword').placeholder = '';
   }
@@ -87,12 +88,13 @@
     peerId = String(connection.address || '').replace(/\s+/g, '');
     $r('rustdeskName').textContent = connection.name || 'RustDesk';
     $r('rustdeskPeer').textContent = peerId;
-    $r('rustdeskServer').value = localStorage.getItem('rustdesk_server') || '';
-    $r('rustdeskKey').value = localStorage.getItem('rustdesk_public_key') || '';
+    const hasSavedConfig = Boolean(connection.rustdesk_server || connection.rustdesk_key);
+    serverAddress = hasSavedConfig ? (connection.rustdesk_server || '') : (localStorage.getItem('rustdesk_server') || '');
+    publicKey = hasSavedConfig ? (connection.rustdesk_key || '') : (localStorage.getItem('rustdesk_public_key') || '');
     $r('rustdeskError').textContent = '';
     $r('rustdeskOverlay').classList.remove('hidden');
     status('Не подключено');
-    $r('rustdeskServer').focus();
+    $r('rustdeskPassword').focus();
   };
   window.closeEmbeddedRustDesk = close;
   $r('rustdeskClose').addEventListener('click', close);
@@ -134,36 +136,51 @@
       return;
     }
     let config;
-    try { config = window.RustDeskConfig.directRustDeskConfig({ server: $r('rustdeskServer').value, publicKey: $r('rustdeskKey').value }); }
-    catch (error) { $r('rustdeskError').textContent = error.message; return; }
-    const serverAddress = $r('rustdeskServer').value.trim();
-    localStorage.setItem('rustdesk_server', serverAddress);
-    localStorage.setItem('rustdesk_public_key', config.publicKey);
+    try { config = window.RustDeskConfig.directRustDeskConfig({ server: serverAddress, publicKey }); }
+    catch (error) { $r('rustdeskError').textContent = `Настройте сервер ID и публичный ключ в карточке подключения. ${error.message}`; return; }
     initialPassword = input.value;
     input.value = '';
     prompted = false;
     const generation = ++attempt;
     let current;
     try {
-      current = new window.RustDeskWeb.Session({ peerId, server: {
+      const bridge = window.rdpManager.fileTransfer;
+      const fileClipboardAvailable = Boolean(await bridge?.virtualAvailable?.());
+      if (generation !== attempt) return;
+      current = new window.RustDeskWeb.Session({ peerId, fileClipboard: fileClipboardAvailable, server: {
         rendezvousUrl: config.idUrl,
         key: config.publicKey,
         relayUrl: (announced) => announced ? window.RustDeskConfig.directRelayUrl(announced) : config.fallbackRelayUrl,
       } });
       session = current;
-      viewer = new window.RustDeskWeb.Viewer($r('rustdeskViewer'), current, { scaleMode: 'fit', handleRemoteClipboard: false });
+      viewer = new window.RustDeskWeb.Viewer($r('rustdeskViewer'), current, { scaleMode: 'fit', handleRemoteClipboard: false, ...(fileClipboardAvailable ? { prepareFilePaste: () => fileClipboard?.preparePaste() ?? Promise.resolve(false) } : {}) });
       clipboardSync = window.createRustDeskClipboardSync({
         read: () => window.rdpManager.fileTransfer.readTextOnly(),
         write: (text) => window.rdpManager.writeClipboard(text),
         send: (text) => current.sendClipboard(text),
-        canSend: () => session === current && current.canControl && current.permission.clipboard,
+        canSend: () => session === current && current.canControl && current.permission.clipboard && !fileClipboard?.isReceiving(),
         onError: (error) => console.warn('RustDesk clipboard:', error),
       });
-      current.on('clipboard', ({ text }) => { if (session === current && current.permission.clipboard) clipboardSync?.remote(text); });
+      if (fileClipboardAvailable) {
+        fileClipboard = window.createRustDeskFileClipboard({
+          protocol: window.RustDeskFileProtocol, bridge,
+          send: (data) => current.sendFileClipboard(data),
+          onRemoteOffer: () => clipboardSync?.invalidate(),
+          canSend: () => session === current && current.canControl && current.permission.clipboard && current.permission.file,
+          onError: (error) => console.warn('RustDesk file clipboard:', error),
+        });
+        current.on('fileClipboard', ({ data }) => { if (session === current) fileClipboard?.receive(data); });
+      }
+      current.on('clipboard', ({ text }) => { if (session === current && current.permission.clipboard) { fileClipboard?.invalidateRemote(); clipboardSync?.remote(text); } });
       current.on('peer', ({ peer }) => { if (session === current) updateDisplays(peer); });
       current.on('display', () => { if (session === current) updateDisplays(current.peer); });
-      current.on('permission', ({ name, enabled }) => { if (session === current && name === 'clipboard' && enabled) void clipboardSync?.poll(); });
-      viewer.on('files', () => { if (session === current) status('Вставка файлов пока не поддерживается', 'error'); });
+      current.on('permission', ({ name, enabled }) => {
+        if (session !== current) return;
+        if ((name === 'clipboard' || name === 'file' || name === 'keyboard') && !enabled) fileClipboard?.suspend();
+        if (enabled && name === 'clipboard') void clipboardSync?.poll();
+        if (enabled && (name === 'clipboard' || name === 'file' || name === 'keyboard')) void fileClipboard?.poll();
+      });
+      viewer.on('files', () => { if (session === current && !fileClipboardAvailable) status('Вставка файлов доступна только в Windows с OLE-буфером', 'error'); });
       current.on('state', ({ state }) => { if (session === current && state !== 'connected' && state !== 'closed') status('Подключение…', 'connecting'); });
       current.on('password', ({ wrong }) => {
         if (session !== current) return;
@@ -183,6 +200,7 @@
         $r('rustdeskDisconnect').disabled = false;
         updateDisplays(current.peer);
         clipboardSync?.start();
+        fileClipboard?.start();
         status('Подключено', 'connected');
         $r('rustdeskViewer').querySelector('.rdweb-root')?.focus();
       });
