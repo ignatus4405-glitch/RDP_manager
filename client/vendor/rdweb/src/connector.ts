@@ -122,6 +122,7 @@ export interface ConnectorConfig {
   rememberedHash?: Uint8Array;
   myName?: string;
   myId?: string;
+  myPlatform?: string;
   clientVersion?: string;
   /**
    * After this many milliseconds without a message either way, send a
@@ -299,6 +300,15 @@ export class PeerConnector {
     this.lastActivity = Date.now();
   }
 
+  // The file clipboard is another protobuf Message member on the same encrypted link.
+  sendRawMessage(bytes: Uint8Array): void {
+    const relay = this.relay;
+    const cipher = this.cipher;
+    if (this.closed || !relay || !cipher || !relay.isOpen) return;
+    relay.send(cipher.seal(bytes));
+    this.lastActivity = Date.now();
+  }
+
   /** Fails a pending connect() with `err` (the link itself stays as is). */
   rejectLogin(err: Error): void {
     this.clearApprovalTimer();
@@ -424,7 +434,7 @@ export class PeerConnector {
           password: proof,
           myId: this.cfg.myId ?? WEB_ID_PREFIX,
           myName: this.cfg.myName ?? "Web client",
-          myPlatform: "Web",
+          myPlatform: this.cfg.myPlatform ?? "Web",
           version: this.clientVersion,
           sessionId: this.sessionId,
         },

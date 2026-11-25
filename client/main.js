@@ -12,7 +12,7 @@ const { compareVersions, parseServiceStatus, readLogTail } = require('./server-m
 const { createUpdateController } = require('./update-controller');
 const { createRdpFileWriter } = require('./rdp-file-writer');
 const { createClipboardFileSource } = require('./clipboard-file-source');
-const { createClipboardReceiver } = require('./rdp-clipboard-receiver');
+const { createClipboardReceiver, clipboardFingerprint } = require('./rdp-clipboard-receiver');
 const { createRichClipboard } = require('./clipboard-rich');
 const { createWindowsVirtualClipboard } = require('./windows-virtual-clipboard');
 const { createWindowsLayoutHook } = require('./windows-layout-hook');
@@ -378,7 +378,19 @@ ipcMain.on('rdp-layout-focus', (event, focused, token) => {
 });
 ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
-ipcMain.handle('rdp-virtual-publish', (event, files) => { requireClientWindow(event); if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.'); return windowsVirtualClipboard.publish(files); });
+ipcMain.handle('rdp-virtual-publish', async (event, files, expectedFingerprint) => {
+  requireClientWindow(event);
+  if (process.platform !== 'win32') throw new Error('OLE доступен только в Windows.');
+  if (expectedFingerprint !== undefined) {
+    if (typeof expectedFingerprint !== 'string' || windowsVirtualClipboard.isActive() || await clipboardFingerprint(clipboard) !== expectedFingerprint) throw new Error('Локальный буфер изменился; удалённые файлы не опубликованы.');
+  }
+  return windowsVirtualClipboard.publish(files);
+});
+ipcMain.handle('rdp-clipboard-fingerprint', async (event) => {
+  requireClientWindow(event);
+  if (windowsVirtualClipboard.isActive()) throw new Error('Буфер используется другим сеансом.');
+  return clipboardFingerprint(clipboard);
+});
 ipcMain.handle('rdp-virtual-activate', (event, token) => { requireClientWindow(event); return windowsVirtualClipboard.activate(token); });
 ipcMain.handle('rdp-virtual-clear', (event, token) => { requireClientWindow(event); if (typeof token !== 'string') return; return windowsVirtualClipboard.clear(token); });
 ipcMain.handle('rdp-virtual-response', (event, response) => { requireClientWindow(event); return windowsVirtualClipboard.respond(response); });

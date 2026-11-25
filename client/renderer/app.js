@@ -459,8 +459,8 @@ let rdpFileTransfer = null;
 const rdpVirtualOffers = new Map();
 window.rdpManager?.fileTransfer?.onVirtualRead(async (request) => {
   const offer = rdpVirtualOffers.get(request.token);
+  if (!offer) return; // Another session may own this OLE token.
   try {
-    if (!offer) throw new Error('Содержимое буфера изменилось.');
     const bytes = await offer.read(request.index, request.position, request.size);
     await window.rdpManager.fileTransfer.virtualRespond({ token: request.token, requestId: request.requestId, bytes });
   } catch (error) {
@@ -1017,6 +1017,12 @@ function openConnectionModal(conn) {
       <option value="anydesk" ${c.type === 'anydesk' ? 'selected' : ''}>AnyDesk (ID, напр. 123 456 789)</option>
       <option value="rustdesk" ${c.type === 'rustdesk' ? 'selected' : ''}>RustDesk (ID)</option>
     </select>
+    <div id="fRustDeskConfig" class="hidden">
+      <label for="fRustDeskServer">Сервер ID RustDesk *</label>
+      <input id="fRustDeskServer" value="${esc(c.rustdesk_server || '')}" placeholder="IP или имя сервера" spellcheck="false" />
+      <label for="fRustDeskKey">Публичный ключ сервера RustDesk *</label>
+      <input id="fRustDeskKey" value="${esc(c.rustdesk_key || '')}" placeholder="id_ed25519.pub" spellcheck="false" />
+    </div>
     <label>Название *</label>
     <input id="fName" value="${esc(c.name)}" placeholder="Сервер 1С, ПК бухгалтера…" />
     <div class="form-row">
@@ -1058,8 +1064,11 @@ function openConnectionModal(conn) {
           tags: $('fTags').value.trim(),
           username: $('fUsername').value.trim(),
           description: $('fDescription').value.trim(),
+          rustdesk_server: $('fType').value === 'rustdesk' ? $('fRustDeskServer').value.trim() : '',
+          rustdesk_key: $('fType').value === 'rustdesk' ? $('fRustDeskKey').value.trim() : '',
         };
         try {
+          if (payload.type === 'rustdesk') window.RustDeskConfig.directRustDeskConfig({ server: payload.rustdesk_server, publicKey: payload.rustdesk_key });
           if (isEdit) await api('/connections/' + c.id, { method: 'PUT', body: payload });
           else await api('/connections', { method: 'POST', body: payload });
           closeModal();
@@ -1070,7 +1079,10 @@ function openConnectionModal(conn) {
     },
   ]);
 
-  const syncPortVisibility = () => { $('fPortWrap').style.visibility = $('fType').value === 'rdp' ? 'visible' : 'hidden'; };
+  const syncPortVisibility = () => {
+    $('fPortWrap').style.visibility = $('fType').value === 'rdp' ? 'visible' : 'hidden';
+    $('fRustDeskConfig').classList.toggle('hidden', $('fType').value !== 'rustdesk');
+  };
   $('fType').addEventListener('change', syncPortVisibility);
   syncPortVisibility();
 }

@@ -11,6 +11,7 @@ const net = require('net');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -36,6 +37,11 @@ async function waitForServer(base, tries = 60) {
 
 test('server smoke: health → login → CRUD → защита доступа', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdp-manager-test-'));
+  // Simulate the connections table from a pre-migration installation.
+  const oldDb = new DatabaseSync(path.join(dataDir, 'rdp-manager.db'));
+  oldDb.exec(`CREATE TABLE connections (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER, category TEXT NOT NULL DEFAULT 'Общее', tags TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+    INSERT INTO connections (type, name, address) VALUES ('rustdesk', 'Старое', '123');`);
+  oldDb.close();
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(
@@ -91,6 +97,21 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const { connection } = await created.json();
   assert.equal(connection.port, 3389);
   assert.equal(connection.tags, 'a,b');
+
+  const legacy = (await (await get('/api/connections?type=rustdesk', token)).json()).connections[0];
+  assert.equal(legacy.rustdesk_server, '');
+  assert.equal(legacy.rustdesk_key, '');
+  const key = Buffer.alloc(32, 42).toString('base64');
+  const rd = await post('/api/connections', { type: 'rustdesk', name: 'RD', address: '123456', rustdesk_server: '37.17.55.196', rustdesk_key: key }, token);
+  assert.equal(rd.status, 201);
+  const rdConnection = (await rd.json()).connection;
+  assert.equal(rdConnection.rustdesk_server, '37.17.55.196');
+  assert.equal(rdConnection.rustdesk_key, key);
+  const updated = await fetch(base + '/api/connections/' + rdConnection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: 'RD2' }) });
+  assert.equal(updated.status, 200);
+  assert.equal((await updated.json()).connection.rustdesk_key, key);
+  const badKey = await post('/api/connections', { type: 'rustdesk', name: 'Bad', address: '123', rustdesk_server: 'host', rustdesk_key: 'bad' }, token);
+  assert.equal(badKey.status, 400);
 
   // 3. Поиск и фильтр по тегу
   const found = await get('/api/connections?tag=' + encodeURIComponent('b'), token);
