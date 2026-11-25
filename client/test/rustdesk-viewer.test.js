@@ -5,21 +5,24 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const { directRustDeskConfig, directRelayUrl } = require('../renderer/rustdesk-config');
+const { createRustDeskClipboardSync } = require('../renderer/rustdesk-clipboard');
 
 function setup(protocol = 'file:') {
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) {
       const handlers = {}; const hidden = new Set();
-      elements.set(id, { value: '', textContent: '', disabled: false, dataset: {}, handlers,
-        classList: { add: (x) => hidden.add(x), remove: (x) => hidden.delete(x), contains: (x) => hidden.has(x) },
+      elements.set(id, { value: '', textContent: '', disabled: false, dataset: {}, handlers, children: [], replaceChildren() { this.children = []; }, appendChild(child) { this.children.push(child); },
+        classList: { add: (x) => hidden.add(x), remove: (x) => hidden.delete(x), contains: (x) => hidden.has(x), toggle: (x, enabled) => { if (enabled) hidden.add(x); else hidden.delete(x); } },
         addEventListener: (name, fn) => { handlers[name] = fn; }, focus() {}, contains: () => false, querySelector: () => ({ focus() {} }) });
     }
     return elements.get(id);
   }
   const store = new Map(); const sessions = [];
   class Session {
-    constructor(options) { this.options = options; this.handlers = {}; sessions.push(this); }
+    constructor(options) { this.options = options; this.handlers = {}; this.canControl = true; this.permission = { clipboard: true }; this.peer = { displays: [], currentDisplay: 0 }; sessions.push(this); }
+    sendClipboard(text) { this.sent = text; }
+    switchDisplay(index) { this.switched = index; }
     on(name, fn) { this.handlers[name] = fn; }
     connect() { return new Promise(() => {}); }
     close() { this.closed = true; }
@@ -27,8 +30,8 @@ function setup(protocol = 'file:') {
     submitTwoFactor(code) { this.code = code; }
   }
   class Viewer { constructor() { this.handlers = {}; } on(n, f) { this.handlers[n] = f; } destroy() { this.destroyed = true; } }
-  const window = { location: { protocol }, RustDeskWeb: { Session, Viewer }, RustDeskConfig: { directRustDeskConfig, directRelayUrl }, rdpManager: { writeClipboard: async () => {} } };
-  const context = { window, document: { getElementById: element }, localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) }, VideoDecoder: function () {}, EncodedVideoChunk: function () {}, console };
+  const window = { location: { protocol }, RustDeskWeb: { Session, Viewer }, RustDeskConfig: { directRustDeskConfig, directRelayUrl }, createRustDeskClipboardSync, rdpManager: { writeClipboard: async () => {}, fileTransfer: { readTextOnly: async () => null } } };
+  const context = { window, document: { getElementById: element, createElement: () => ({}) }, localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) }, VideoDecoder: function () {}, EncodedVideoChunk: function () {}, console };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/rustdesk.js'), 'utf8'), context);
   window.openEmbeddedRustDesk({ address: '123 456', name: 'test' });
@@ -64,4 +67,24 @@ test('does not open insecure WebSockets in the browser', () => {
   void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
   assert.equal(h.sessions.length, 0);
   assert.match(h.element('rustdeskError').textContent, /десктоп/);
+});
+
+
+test('monitor selector follows remote screen changes and is cleared on disconnect', () => {
+  const h = setup();
+  void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  const session = h.sessions[0];
+  session.peer = { displays: [{ name: 'Main', online: true }, { name: 'Second', online: true }], currentDisplay: 0 };
+  session.handlers.connected({});
+  const select = h.element('rustdeskDisplay');
+  assert.equal(select.classList.contains('hidden'), false);
+  assert.equal(select.children.length, 2);
+  select.handlers.change({ target: { value: '1' } });
+  assert.equal(session.switched, 1);
+  session.peer.currentDisplay = 1;
+  session.handlers.display({});
+  assert.equal(select.value, '1');
+  h.window.closeEmbeddedRustDesk();
+  assert.equal(select.classList.contains('hidden'), true);
+  assert.equal(select.children.length, 0);
 });

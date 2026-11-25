@@ -18,6 +18,15 @@ function createRichClipboard({ clipboard, ClipboardItem }) {
     }
     return { signature: hash.digest('hex'), entries };
   }
+  async function readTextOnly() {
+    const items = await clipboard.read();
+    if (items.some((item) => item.types.includes('text/uri-list'))) return null;
+    const item = items.find((entry) => entry.types.includes('text/plain'));
+    if (!item) return null;
+    const blob = await item.getType('text/plain');
+    if (blob.size > 4 * 1024 * 1024) return null;
+    return blob.text();
+  }
   async function write(entries) {
     if (!Array.isArray(entries)) throw new Error('Некорректный буфер обмена.');
     const values = {};
@@ -35,6 +44,6 @@ function createRichClipboard({ clipboard, ClipboardItem }) {
     await clipboard.write([new ClipboardItem(values)]);
     return (await read()).signature;
   }
-  return { read, write };
+  return { read, readTextOnly, write };
 }
 module.exports = { createRichClipboard };
