@@ -9,6 +9,7 @@
   let credential = null;
   let prompted = false;
   let initialPassword = '';
+  let clipboardSync = null;
 
   function status(text, kind = 'idle') {
     $r('rustdeskStatus').textContent = text;
@@ -19,6 +20,11 @@
     credential = null;
     initialPassword = '';
     $r('rustdeskPassword').value = '';
+    clipboardSync?.stop();
+    clipboardSync = null;
+    $r('rustdeskDisplay').replaceChildren();
+    $r('rustdeskDisplay').classList.add('hidden');
+    $r('rustdeskDisplayLabel').classList.add('hidden');
     const oldSession = session;
     const oldViewer = viewer;
     session = null;
@@ -30,6 +36,27 @@
     $r('rustdeskForm').classList.remove('hidden');
     $r('rustdeskViewer').classList.add('hidden');
   }
+  function updateDisplays(peer) {
+    const select = $r('rustdeskDisplay');
+    const displays = Array.isArray(peer?.displays) ? peer.displays : [];
+    select.replaceChildren();
+    displays.forEach((display, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = `Монитор ${index + 1}${display.name ? ` · ${display.name}` : ''}`;
+      option.disabled = display.online === false;
+      select.appendChild(option);
+    });
+    select.value = String(peer?.currentDisplay ?? 0);
+    select.classList.toggle('hidden', displays.length < 2);
+    $r('rustdeskDisplayLabel').classList.toggle('hidden', displays.length < 2);
+  }
+  $r('rustdeskDisplay').addEventListener('change', (event) => {
+    const index = Number(event.target.value);
+    if (!session || !Number.isInteger(index) || index < 0 || index >= (session.peer?.displays?.length ?? 0)) return;
+    session.switchDisplay(index);
+    $r('rustdeskViewer').querySelector('.rdweb-root')?.focus();
+  });
   function close() {
     dispose();
     $r('rustdeskOverlay').classList.add('hidden');
@@ -124,8 +151,18 @@
         relayUrl: (announced) => announced ? window.RustDeskConfig.directRelayUrl(announced) : config.fallbackRelayUrl,
       } });
       session = current;
-      viewer = new window.RustDeskWeb.Viewer($r('rustdeskViewer'), current, { scaleMode: 'fit' });
-      viewer.on('clipboardBlocked', ({ text }) => { if (session === current) window.rdpManager.writeClipboard(text).catch((error) => console.warn('RustDesk clipboard:', error)); });
+      viewer = new window.RustDeskWeb.Viewer($r('rustdeskViewer'), current, { scaleMode: 'fit', handleRemoteClipboard: false });
+      clipboardSync = window.createRustDeskClipboardSync({
+        read: () => window.rdpManager.fileTransfer.readTextOnly(),
+        write: (text) => window.rdpManager.writeClipboard(text),
+        send: (text) => current.sendClipboard(text),
+        canSend: () => session === current && current.canControl && current.permission.clipboard,
+        onError: (error) => console.warn('RustDesk clipboard:', error),
+      });
+      current.on('clipboard', ({ text }) => { if (session === current && current.permission.clipboard) clipboardSync?.remote(text); });
+      current.on('peer', ({ peer }) => { if (session === current) updateDisplays(peer); });
+      current.on('display', () => { if (session === current) updateDisplays(current.peer); });
+      current.on('permission', ({ name, enabled }) => { if (session === current && name === 'clipboard' && enabled) void clipboardSync?.poll(); });
       viewer.on('files', () => { if (session === current) status('Вставка файлов пока не поддерживается', 'error'); });
       current.on('state', ({ state }) => { if (session === current && state !== 'connected' && state !== 'closed') status('Подключение…', 'connecting'); });
       current.on('password', ({ wrong }) => {
@@ -144,6 +181,8 @@
         $r('rustdeskForm').classList.add('hidden');
         $r('rustdeskViewer').classList.remove('hidden');
         $r('rustdeskDisconnect').disabled = false;
+        updateDisplays(current.peer);
+        clipboardSync?.start();
         status('Подключено', 'connected');
         $r('rustdeskViewer').querySelector('.rdweb-root')?.focus();
       });

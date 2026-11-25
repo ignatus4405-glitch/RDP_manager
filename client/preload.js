@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('rdpManager', {
     virtualClear: (token) => ipcRenderer.invoke('rdp-virtual-clear', token),
     virtualRespond: (response) => ipcRenderer.invoke('rdp-virtual-response', response),
     onVirtualRead: (cb) => bindChannel('rdp-virtual-read', cb),
+    readTextOnly: () => ipcRenderer.invoke('rdp-clipboard-read-text-only'),
     readRich: () => ipcRenderer.invoke('rdp-clipboard-read-rich'),
     writeRich: (entries) => ipcRenderer.invoke('rdp-clipboard-write-rich', entries),
     clipboardFiles: () => ipcRenderer.invoke('rdp-clipboard-files'),

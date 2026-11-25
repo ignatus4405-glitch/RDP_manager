@@ -15,6 +15,8 @@ export type ScaleMode = "fit" | "original" | "stretch";
 export type InputMode = "mouse" | "trackpad" | "touch";
 
 export interface ViewerOptions {
+  /** The host handles remote clipboard updates itself. */
+  handleRemoteClipboard?: boolean;
   scaleMode?: ScaleMode;
   /** Defaults to "trackpad" on touch-first devices and "mouse" otherwise. */
   inputMode?: InputMode;
@@ -174,7 +176,7 @@ export class Viewer {
         this.haveCursorPos = true;
         this.positionCursor();
       }),
-      session.on("clipboard", ({ text }) => void this.writeLocalClipboard(text)),
+      session.on("clipboard", ({ text }) => { if (opts.handleRemoteClipboard !== false) void this.writeLocalClipboard(text); }),
       session.on("close", () => this.releaseInput()),
     );
 

@@ -382,6 +382,7 @@ ipcMain.handle('rdp-virtual-publish', (event, files) => { requireClientWindow(ev
 ipcMain.handle('rdp-virtual-activate', (event, token) => { requireClientWindow(event); return windowsVirtualClipboard.activate(token); });
 ipcMain.handle('rdp-virtual-clear', (event, token) => { requireClientWindow(event); if (typeof token !== 'string') return; return windowsVirtualClipboard.clear(token); });
 ipcMain.handle('rdp-virtual-response', (event, response) => { requireClientWindow(event); return windowsVirtualClipboard.respond(response); });
+ipcMain.handle('rdp-clipboard-read-text-only', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive() ? null : richClipboard.readTextOnly(); });
 ipcMain.handle('rdp-clipboard-read-rich', (event) => { requireClientWindow(event); return richClipboard.read(); });
 ipcMain.handle('rdp-clipboard-write-rich', (event, entries) => { requireClientWindow(event); return richClipboard.write(entries); });
 ipcMain.handle('rdp-clipboard-files', (event) => { requireClientWindow(event); return clipboardFileSource.inspect(); });

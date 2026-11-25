@@ -227,7 +227,7 @@
 <div id="rustdeskOverlay" class="rdp-overlay hidden" role="dialog" aria-modal="true" aria-label="RustDesk-сессия">
   <div class="rdp-topbar"><div class="rdp-title"><span class="dot rustdesk"></span><strong id="rustdeskName">RustDesk</strong><span id="rustdeskPeer" class="muted"></span></div>
     <span id="rustdeskStatus" class="rdp-status" data-kind="idle">Не подключено</span>
-    <div class="rdp-actions"><button id="rustdeskDisconnect" class="btn-danger" disabled>Отключиться</button><button id="rustdeskClose" class="icon-btn" aria-label="Закрыть">✕</button></div></div>
+    <div class="rdp-actions"><label for="rustdeskDisplay" class="muted hidden" id="rustdeskDisplayLabel">Монитор</label><select id="rustdeskDisplay" class="select hidden" aria-label="Удалённый монитор"></select><button id="rustdeskDisconnect" class="btn-danger" disabled>Отключиться</button><button id="rustdeskClose" class="icon-btn" aria-label="Закрыть">✕</button></div></div>
   <div class="rdp-body">
     <form id="rustdeskForm" class="rdp-connect-form">
       <h3>Встроенный RustDesk</h3>
@@ -248,6 +248,7 @@
 <script src="rdp-file-transfer.js"></script>
 <script src="rustdesk-config.js"></script>
 <script src="vendor/rustdesk/bundle.js"></script>
+<script src="rustdesk-clipboard.js"></script>
 <script src="rustdesk.js"></script>
 <script src="app.js"></script>
 </body>
