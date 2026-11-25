@@ -7,16 +7,20 @@
   "scripts": {
     "start": "electron .",
     "server-manager": "electron . --server-manager",
-    "dist": "npm run build:ironrdp && npm run build:rustdesk && electron-builder",
+    "dist": "npm run build:ironrdp && npm run build:rustdesk && npm run build:ssh && electron-builder",
     "build:ironrdp": "node scripts/build-ironrdp.js",
     "stage:windows-server": "node scripts/stage-windows-server.js",
-    "build:rustdesk": "node scripts/build-rustdesk.js"
+    "build:rustdesk": "node scripts/build-rustdesk.js",
+    "build:ssh": "node scripts/build-ssh.js"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "electron-updater": "^6.8.11",
     "fzstd": "^0.1.1",
     "opus-decoder": "^0.7.12",
+    "ssh2": "^1.17.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
@@ -30,6 +34,9 @@
     "productName": "RDP Manager",
     "files": [
       "main.js",
+      "ssh-session.js",
+      "web-app-view.js",
+      "web-app-security.js",
       "preload.js",
       "server-manager-utils.js",
       "update-controller.js",
@@ -48,7 +55,16 @@
       "target": "nsis",
       "icon": "assets/icon.png",
       "artifactName": "RDPManager-Setup-${version}.${ext}",
-      "extraResources": [{ "from": "build/rdp-virtual-clipboard.exe", "to": "rdp-virtual-clipboard.exe" }, { "from": "build/rdp-layout-hook.exe", "to": "rdp-layout-hook.exe" }]
+      "extraResources": [
+        {
+          "from": "build/rdp-virtual-clipboard.exe",
+          "to": "rdp-virtual-clipboard.exe"
+        },
+        {
+          "from": "build/rdp-layout-hook.exe",
+          "to": "rdp-layout-hook.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -60,7 +76,9 @@
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "language": "1049",
-      "installerLanguages": ["ru_RU"],
+      "installerLanguages": [
+        "ru_RU"
+      ],
       "multiLanguageInstaller": true,
       "shortcutName": "RDP Manager"
     },

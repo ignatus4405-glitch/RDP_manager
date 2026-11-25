@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http: https: ws: wss:" />
 <title>RDP Manager</title>
+<link rel="stylesheet" href="vendor/ssh/xterm.css" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -90,7 +91,7 @@
     <!-- ===== Подключения ===== -->
     <section id="connectionsView" class="view">
       <div class="view-header">
-        <div><h2>Подключения</h2><p class="muted">Доступные RDP, AnyDesk и RustDesk узлы</p></div>
+        <div><h2>Подключения</h2><p class="muted">Доступные RDP, RustDesk, SSH и SFTP узлы</p></div>
         <button id="btnAddConnection" class="btn-primary admin-only hidden">+ Добавить подключение</button>
       </div>
 
@@ -104,6 +105,9 @@
         <button class="pill" data-type="rdp"><span class="dot rdp"></span>RDP <span id="cntRdp"></span></button>
         <button class="pill" data-type="anydesk"><span class="dot anydesk"></span>AnyDesk <span id="cntAnydesk"></span></button>
         <button class="pill" data-type="rustdesk"><span class="dot rustdesk"></span>RustDesk <span id="cntRustdesk"></span></button>
+        <button class="pill" data-type="ssh">SSH <span id="cntSsh"></span></button>
+        <button class="pill" data-type="sftp">SFTP <span id="cntSftp"></span></button>
+        <button class="pill" data-type="web">Веб <span id="cntWeb"></span></button>
       </div>
 
       <div id="connectionsGrid" class="cards-grid"></div>
@@ -208,9 +212,11 @@
   <div class="rdp-body">
     <form id="rdpConnectForm" class="rdp-connect-form">
       <h3>Подключение к «<span id="rdpFormName"></span>»</h3>
-      <p class="muted">Десктоп откроется прямо здесь — как в Remote Desktop Manager. Пароль используется только для этой сессии и нигде не сохраняется.</p>
+      <p class="muted">Десктоп откроется прямо здесь — как в Remote Desktop Manager. Пароль можно ввести вручную или использовать сохранённый в карточке.</p>
       <label for="rdpUsername">Пользователь</label>
       <input id="rdpUsername" autocomplete="off" spellcheck="false" placeholder="DOMAIN\user или user" />
+      <label for="rdpDomain">Домен (необязательно)</label>
+      <input id="rdpDomain" autocomplete="off" spellcheck="false" placeholder="DOMAIN" />
       <label for="rdpPassword">Пароль</label>
       <input id="rdpPassword" type="password" autocomplete="off" placeholder="Пароль RDP" />
       <p id="rdpFormError" class="login-error"></p>
@@ -239,6 +245,28 @@
   </div>
 </div>
 
+<div id="sshOverlay" class="rdp-overlay hidden" role="dialog" aria-modal="true" aria-label="SSH или SFTP">
+  <div class="rdp-topbar"><strong id="sshName">SSH</strong><span id="sshStatus" class="rdp-status">Не подключено</span><div class="rdp-actions"><button id="sshDisconnect" class="btn-danger">Отключиться</button><button id="sshClose" class="icon-btn" aria-label="Закрыть">✕</button></div></div>
+  <div class="rdp-body">
+    <form id="sshForm" class="rdp-connect-form">
+      <h3>SSH / SFTP</h3><p class="muted tiny">Соединение напрямую с компьютера клиента. При подключении обязательно сверьте отпечаток ключа сервера по доверенному каналу.</p>
+      <label for="sshUsername">Пользователь</label><input id="sshUsername" autocomplete="off" required />
+      <label for="sshPassword">Пароль</label><input id="sshPassword" type="password" autocomplete="off" />
+      <p id="sshError" class="login-error"></p><button id="sshConnect" type="submit" class="btn-primary big">Подключиться</button>
+    </form>
+    <div id="sshTerminal" class="ssh-terminal hidden"></div>
+    <section id="sftpPanel" class="sftp-panel hidden">
+      <div class="sftp-toolbar"><button id="sftpUp" class="btn-ghost">↑</button><input id="sftpPath" aria-label="Удалённый путь" /><button id="sftpGo" class="btn-ghost">Открыть</button><button id="sftpUpload" class="btn-primary">Загрузить файл</button></div>
+      <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер, байт</th><th></th></tr></thead><tbody id="sftpEntries"></tbody></table></div>
+    </section>
+  </div>
+</div>
+
+<div id="webOverlay" class="rdp-overlay hidden" role="dialog" aria-label="Веб-приложение">
+  <div class="rdp-topbar"><strong id="webName">Веб</strong><span id="webStatus" class="rdp-status"></span><div class="rdp-actions"><button id="webBack" class="btn-ghost">Назад</button><button id="webReload" class="btn-ghost">Обновить</button><button id="webClose" class="icon-btn" aria-label="Закрыть">✕</button></div></div>
+  <div id="webSurface" class="rdp-body"></div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script src="vendor/ironrdp/bundle.js"></script>
@@ -250,6 +278,11 @@
 <script src="rustdesk-file-protocol.js"></script>
 <script src="rustdesk-file-clipboard.js"></script>
 <script src="rustdesk.js"></script>
+<script src="rdp-credentials.js"></script>
+<script src="secret-transport.js"></script>
+<script src="vendor/ssh/bundle.js"></script>
+<script src="ssh.js"></script>
+<script src="web-app.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS connections (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  type        TEXT NOT NULL CHECK (type IN ('rdp', 'anydesk', 'rustdesk')),
+  type        TEXT NOT NULL CHECK (type IN ('rdp', 'anydesk', 'rustdesk', 'ssh', 'sftp', 'web')),
   name        TEXT NOT NULL,
   address     TEXT NOT NULL,
   port        INTEGER,
@@ -47,6 +47,13 @@ CREATE TABLE IF NOT EXISTS connections (
 );
 CREATE INDEX IF NOT EXISTS idx_connections_type ON connections(type);
 CREATE INDEX IF NOT EXISTS idx_connections_category ON connections(category);
+
+CREATE TABLE IF NOT EXISTS connection_secrets (
+  connection_id INTEGER PRIMARY KEY REFERENCES connections(id) ON DELETE CASCADE,
+  iv BLOB NOT NULL,
+  ciphertext BLOB NOT NULL,
+  tag BLOB NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS documents (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,8 +69,37 @@ CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
 
 // Existing databases predate per-connection RustDesk configuration.
 const connectionColumns = new Set(db.prepare('PRAGMA table_info(connections)').all().map((column) => column.name));
-for (const name of ['rustdesk_server', 'rustdesk_key']) {
+for (const name of ['rustdesk_server', 'rustdesk_key', 'domain']) {
   if (!connectionColumns.has(name)) db.exec(`ALTER TABLE connections ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
+}
+
+// SQLite cannot alter a CHECK constraint in-place. Preserve ids, dependent
+// secret rows, timestamps and indexes while upgrading older databases.
+const connectionsSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='connections'").get().sql;
+if (!connectionsSchema.includes("'ssh'") || !connectionsSchema.includes("'sftp'") || !connectionsSchema.includes("'web'")) {
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE connections_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK (type IN ('rdp', 'anydesk', 'rustdesk', 'ssh', 'sftp', 'web')),
+        name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER,
+        category TEXT NOT NULL DEFAULT 'Общее', tags TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        rustdesk_server TEXT NOT NULL DEFAULT '', rustdesk_key TEXT NOT NULL DEFAULT '', domain TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO connections_new (id, type, name, address, port, category, tags, username, description, created_by, created_at, updated_at, rustdesk_server, rustdesk_key, domain)
+      SELECT id, type, name, address, port, category, tags, username, description, created_by, created_at, updated_at, rustdesk_server, rustdesk_key, domain FROM connections;
+      DROP TABLE connections;
+      ALTER TABLE connections_new RENAME TO connections;
+      CREATE INDEX idx_connections_type ON connections(type);
+      CREATE INDEX idx_connections_category ON connections(category);`);
+    if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Нарушена целостность базы при миграции подключений.');
+    db.exec('COMMIT');
+  } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+  finally { db.exec('PRAGMA foreign_keys = ON'); }
 }
 
 /* ---------- Хеширование паролей (scrypt) ---------- */

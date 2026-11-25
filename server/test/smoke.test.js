@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const { createConnectionSecrets } = require('../src/connection-secrets');
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -39,8 +40,10 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdp-manager-test-'));
   // Simulate the connections table from a pre-migration installation.
   const oldDb = new DatabaseSync(path.join(dataDir, 'rdp-manager.db'));
-  oldDb.exec(`CREATE TABLE connections (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER, category TEXT NOT NULL DEFAULT 'Общее', tags TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
-    INSERT INTO connections (type, name, address) VALUES ('rustdesk', 'Старое', '123');`);
+  oldDb.exec(`CREATE TABLE connections (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('rdp','anydesk','rustdesk')), name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER, category TEXT NOT NULL DEFAULT 'Общее', tags TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+    INSERT INTO connections (type, name, address) VALUES ('rustdesk', 'Старое', '123');
+    CREATE TABLE connection_secrets (connection_id INTEGER PRIMARY KEY REFERENCES connections(id) ON DELETE CASCADE, iv BLOB NOT NULL, ciphertext BLOB NOT NULL, tag BLOB NOT NULL);`);
+  createConnectionSecrets({ db: oldDb, dataDir }).save(1, 'legacy-secret');
   oldDb.close();
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -87,6 +90,10 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const { token, user } = await login.json();
   assert.equal(user.role, 'admin');
   assert.equal(user.must_change_password, true);
+  // Default admin must change their initial password before using stored secrets.
+  const lockedSecret = await fetch(base + '/api/connections/1/secret', { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(lockedSecret.status, 403);
+  assert.equal((await post('/api/change-password', { current_password: 'admin123', new_password: 'admin456' }, token)).status, 200);
 
   // 2. Создание подключения (типизация/валидация)
   const badConn = await post('/api/connections', { type: 'vnc', name: 'x', address: 'y' }, token);
@@ -97,10 +104,27 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const { connection } = await created.json();
   assert.equal(connection.port, 3389);
   assert.equal(connection.tags, 'a,b');
+  assert.equal(connection.domain, '');
+  const domainUpdate = await fetch(base + '/api/connections/' + connection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ domain: 'EXAMPLE' }) });
+  assert.equal(domainUpdate.status, 200);
+  assert.equal((await domainUpdate.json()).connection.domain, 'EXAMPLE');
+  const invalidDomain = await post('/api/connections', { type: 'rdp', name: 'bad', address: 'host', domain: 'domain\\user' }, token);
+  assert.equal(invalidDomain.status, 400);
 
   const legacy = (await (await get('/api/connections?type=rustdesk', token)).json()).connections[0];
   assert.equal(legacy.rustdesk_server, '');
   assert.equal(legacy.rustdesk_key, '');
+  assert.equal(legacy.domain, '');
+  assert.equal((await (await get('/api/connections/' + legacy.id + '/secret', token)).json()).password, 'legacy-secret');
+  const webCreated = await post('/api/connections', { type: 'web', name: 'Portal', address: 'https://example.com/login', username: 'alice' }, token);
+  assert.equal(webCreated.status, 201);
+  assert.equal((await webCreated.json()).connection.type, 'web');
+  for (const address of ['http://example.com', 'https://u:p@example.com', 'file:///tmp/x']) {
+    assert.equal((await post('/api/connections', { type: 'web', name: 'Bad', address }, token)).status, 400);
+  }
+  const sshCreated = await post('/api/connections', { type: 'ssh', name: 'SSH', address: 'ssh.example', username: 'alice' }, token);
+  assert.equal(sshCreated.status, 201);
+  assert.equal((await sshCreated.json()).connection.port, 22);
   const key = Buffer.alloc(32, 42).toString('base64');
   const rd = await post('/api/connections', { type: 'rustdesk', name: 'RD', address: '123456', rustdesk_server: '37.17.55.196', rustdesk_key: key }, token);
   assert.equal(rd.status, 201);
@@ -112,6 +136,18 @@ test('server smoke: health → login → CRUD → защита доступа', 
   assert.equal((await updated.json()).connection.rustdesk_key, key);
   const badKey = await post('/api/connections', { type: 'rustdesk', name: 'Bad', address: '123', rustdesk_server: 'host', rustdesk_key: 'bad' }, token);
   assert.equal(badKey.status, 400);
+
+  const secretUrl = base + '/api/connections/' + rdConnection.id + '/secret';
+  const savedSecret = await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ password: ' SSH $пароль ' }) });
+  assert.equal(savedSecret.status, 200);
+  const secretReply = await fetch(secretUrl, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(secretReply.headers.get('cache-control'), 'no-store');
+  assert.equal((await secretReply.json()).password, ' SSH $пароль ');
+  const exposedList = JSON.stringify(await (await get('/api/connections?type=rustdesk', token)).json());
+  assert.equal(exposedList.includes('SSH $пароль'), false);
+  assert.match(exposedList, /"has_secret":1/);
+  const forwarded = await fetch(secretUrl, { headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-Proto': 'https' } });
+  assert.equal(forwarded.status, 403);
 
   // 3. Поиск и фильтр по тегу
   const found = await get('/api/connections?tag=' + encodeURIComponent('b'), token);
@@ -132,6 +168,10 @@ test('server smoke: health → login → CRUD → защита доступа', 
   assert.equal(empCreate.status, 403, 'сотрудник не должен создавать подключения');
   const empUsers = await get('/api/users', empToken);
   assert.equal(empUsers.status, 403, 'сотрудник не должен видеть список пользователей');
+  const employeeSecretBeforeChange = await get('/api/connections/' + rdConnection.id + '/secret', empToken);
+  assert.equal(employeeSecretBeforeChange.status, 403);
+  const empWriteSecret = await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${empToken}` }, body: JSON.stringify({ password: 'bad' }) });
+  assert.equal(empWriteSecret.status, 403);
   const empRead = await get('/api/connections', empToken);
   assert.equal(empRead.status, 200, 'сотрудник должен видеть подключения');
 
@@ -146,6 +186,23 @@ test('server smoke: health → login → CRUD → защита доступа', 
   assert.equal(change.status, 200);
   const relogin = await post('/api/login', { username: 'sotrudnik', password: 'secret2' });
   assert.equal(relogin.status, 200);
+  const employeeToken = (await relogin.json()).token;
+  const employeeSecret = await get('/api/connections/' + rdConnection.id + '/secret', employeeToken);
+  assert.equal((await employeeSecret.json()).password, ' SSH $пароль ');
+  const disable = await fetch(base + '/api/users/' + (await emp.json()).user.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ disabled: true }) });
+  assert.equal(disable.status, 200);
+  assert.equal((await get('/api/connections/' + rdConnection.id + '/secret', employeeToken)).status, 403);
+  const deletedSecret = await fetch(secretUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(deletedSecret.status, 200);
+  assert.equal((await (await get('/api/connections/' + rdConnection.id + '/secret', token)).json()).password, null);
+  assert.equal((await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ password: 'old-service' }) })).status, 200);
+  const changedAddress = await fetch(base + '/api/connections/' + rdConnection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ address: 'different' }) });
+  assert.equal(changedAddress.status, 200);
+  assert.equal((await (await get('/api/connections/' + rdConnection.id + '/secret', token)).json()).password, null, 'changing target must not reuse its password');
+  assert.equal((await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ password: 'old-service' }) })).status, 200);
+  const changedType = await fetch(base + '/api/connections/' + rdConnection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ type: 'anydesk' }) });
+  assert.equal(changedType.status, 200);
+  assert.equal((await (await get('/api/connections/' + rdConnection.id + '/secret', token)).json()).password, null, 'changing protocol must not reuse its password');
 
   // 7. Отрицательный путь: обращение без токена
   const anon = await get('/api/connections');

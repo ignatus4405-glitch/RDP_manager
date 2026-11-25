@@ -19,6 +19,22 @@ contextBridge.exposeInMainWorld('rdpManager', {
   platform: process.platform,
   rdpLayoutFocus: (focused, token) => ipcRenderer.send('rdp-layout-focus', Boolean(focused), token),
   onRdpLayoutSwitch: (cb) => bindChannel('rdp-layout-switch', cb),
+  webApp: {
+    open: (options) => ipcRenderer.invoke('web-app-open', options),
+    close: (id) => ipcRenderer.invoke('web-app-close', id),
+    bounds: (id, rect) => ipcRenderer.invoke('web-app-bounds', id, rect),
+    action: (id, command) => ipcRenderer.invoke('web-app-action', id, command),
+    onEvent: (cb) => bindChannel('web-app-event', cb),
+  },
+  ssh: {
+    open: (options) => ipcRenderer.invoke('ssh-open', options),
+    close: (id) => ipcRenderer.invoke('ssh-close', id),
+    write: (id, data) => ipcRenderer.invoke('ssh-write', id, data),
+    resize: (id, cols, rows) => ipcRenderer.invoke('ssh-resize', id, cols, rows),
+    list: (id, directory) => ipcRenderer.invoke('ssh-list', id, directory),
+    transfer: (id, remote, direction) => ipcRenderer.invoke('ssh-transfer', id, remote, direction),
+    onEvent: (cb) => bindChannel('ssh-event', cb),
+  },
   fileTransfer: {
     virtualAvailable: () => ipcRenderer.invoke('rdp-virtual-available'),
     virtualActive: () => ipcRenderer.invoke('rdp-virtual-active'),
