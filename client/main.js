@@ -63,7 +63,8 @@ const sshSession = createSshSession({
   },
   chooseUpload: async () => { const result = await dialog.showOpenDialog(mainWindow, { title: 'Выберите файл для загрузки по SFTP', properties: ['openFile'] }); return result.canceled ? null : result.filePaths[0]; },
   chooseDownload: async (name) => { const result = await dialog.showSaveDialog(mainWindow, { title: 'Сохранить файл SFTP', defaultPath: name }); return result.canceled ? null : result.filePath; },
-  confirmOverwrite: async (remote) => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Файл уже существует', message: `Перезаписать удалённый файл?`, detail: remote, buttons: ['Отмена', 'Перезаписать'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
+  localStart: app.getPath('documents'),
+  confirmOverwrite: async (target, location = 'remote') => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Файл уже существует', message: location === 'local' ? 'Перезаписать локальный файл?' : 'Перезаписать удалённый файл?', detail: target, buttons: ['Отмена', 'Перезаписать'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
 });
 const SERVER_SERVICE_NAME = 'RDPManagerServer';
 const GH_REPO = 'ignatus4405-glitch/RDP_manager';
@@ -403,6 +404,8 @@ ipcMain.handle('ssh-close', (event, id) => { requireClientWindow(event); if (typ
 ipcMain.handle('ssh-write', (event, id, data) => { requireClientWindow(event); return sshSession.write(id, data); });
 ipcMain.handle('ssh-resize', (event, id, cols, rows) => { requireClientWindow(event); return sshSession.resize(id, cols, rows); });
 ipcMain.handle('ssh-list', (event, id, directory) => { requireClientWindow(event); return sshSession.list(id, directory); });
+ipcMain.handle('ssh-local-list', (event, id, directory) => { requireClientWindow(event); return sshSession.localList(id, directory); });
+ipcMain.handle('ssh-transfer-between', (event, id, local, remote, name, direction) => { requireClientWindow(event); return sshSession.transferBetween(id, local, remote, name, direction); });
 ipcMain.handle('ssh-transfer', (event, id, remote, direction) => { requireClientWindow(event); return sshSession.transfer(id, remote, direction); });
 ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
