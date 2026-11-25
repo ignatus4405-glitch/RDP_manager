@@ -74,7 +74,7 @@
       queue = queue.catch(() => {}).then(async () => {
         if (!active || rev !== remoteRevision || !canSend()) return;
         await clearVirtual();
-        const newToken = await bridge.virtualPublish(files, baseline);
+        const newToken = await bridge.virtualPublish(files, baseline, true);
         if (!active || rev !== remoteRevision || !canSend()) { await bridge.virtualClear(newToken); return; }
         token = newToken; remoteFiles = files;
         try { await bridge.virtualActivate(newToken); } catch (error) { token = null; await bridge.virtualClear(newToken); throw error; }

@@ -1,6 +1,7 @@
 #include "virtual-clipboard.h"
 #ifdef _WIN32
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <algorithm>
 #include <atomic>
 #include <climits>
@@ -110,21 +111,32 @@ public:
     }
 };
 
-class DataObject final : public IDataObject {
+class DataObject final : public IDataObject, public IDataObjectAsyncCapability {
     std::atomic<ULONG> refs{1};
+    const bool supportsAsync;
+    std::atomic<bool> asyncMode;
+    std::atomic<bool> inOperation{false};
     std::shared_ptr<Source> source;
     CLIPFORMAT descriptors, contents;
 public:
-    explicit DataObject(std::shared_ptr<Source> s) : source(std::move(s)),
+    explicit DataObject(std::shared_ptr<Source> s, bool enableAsync) : supportsAsync(enableAsync), asyncMode(enableAsync), source(std::move(s)),
         descriptors(static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW))),
         contents(static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_FILECONTENTS))) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER; *out = nullptr;
         if (iid == IID_IUnknown || iid == IID_IDataObject) { *out = static_cast<IDataObject*>(this); AddRef(); return S_OK; }
+        if (supportsAsync && iid == __uuidof(IDataObjectAsyncCapability)) { *out = static_cast<IDataObjectAsyncCapability*>(this); AddRef(); return S_OK; }
         return E_NOINTERFACE;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
     ULONG STDMETHODCALLTYPE Release() override { ULONG n = --refs; if (!n) delete this; return n; }
+    // Explorer may extract virtual files in a background operation and show its
+    // own copy UI. This is opt-in for RustDesk; existing RDP behavior is unchanged.
+    HRESULT STDMETHODCALLTYPE SetAsyncMode(BOOL value) override { asyncMode = value != FALSE; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetAsyncMode(BOOL* value) override { if (!value) return E_POINTER; *value = asyncMode ? TRUE : FALSE; return S_OK; }
+    HRESULT STDMETHODCALLTYPE StartOperation(IBindCtx*) override { inOperation = true; return S_OK; }
+    HRESULT STDMETHODCALLTYPE InOperation(BOOL* value) override { if (!value) return E_POINTER; *value = inOperation ? TRUE : FALSE; return S_OK; }
+    HRESULT STDMETHODCALLTYPE EndOperation(HRESULT, IBindCtx*, DWORD) override { inOperation = false; return S_OK; }
     HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* format) override {
         if (!format) return E_POINTER;
         if (format->dwAspect != DVASPECT_CONTENT || format->ptd) return DV_E_FORMATETC;
@@ -172,7 +184,7 @@ public:
 };
 }
 
-HRESULT CreateVirtualFiles(const std::vector<File>& files, Read read, IDataObject** object) {
+HRESULT CreateVirtualFiles(const std::vector<File>& files, Read read, IDataObject** object, bool asyncMode) {
     if (!object) return E_POINTER; *object = nullptr;
     if (!read || files.empty() || files.size() > UINT_MAX) return E_INVALIDARG;
     for (const auto& f : files) {
@@ -187,7 +199,7 @@ HRESULT CreateVirtualFiles(const std::vector<File>& files, Read read, IDataObjec
     }
     try {
         auto source = std::make_shared<Source>(); source->files = files; source->read = std::move(read);
-        *object = new (std::nothrow) DataObject(std::move(source));
+        *object = new (std::nothrow) DataObject(std::move(source), asyncMode);
         return *object ? S_OK : E_OUTOFMEMORY;
     } catch (...) { return E_OUTOFMEMORY; }
 }

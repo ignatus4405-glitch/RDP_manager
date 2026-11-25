@@ -22,7 +22,7 @@ const lines = readline.createInterface({ input: host.stdout });
 lines.on('line', (line) => {
   if (line === 'READY') {
     assert.equal(reads, 0);
-    tester = spawn(path.resolve('virtual-clipboard-test.exe'), ['clipboard'], { stdio: 'inherit', windowsHide: true });
+    tester = spawn(path.resolve('virtual-clipboard-test.exe'), ['clipboard', 'async'], { stdio: 'inherit', windowsHide: true });
     tester.on('error', fail);
     tester.on('exit', (code) => {
       if (code !== 0 || reads !== 1) return fail(new Error(`Consumer exited ${code}; reads: ${reads}`));
@@ -33,4 +33,4 @@ lines.on('line', (line) => {
     host.stdin.write('+aGVsbG8=\n');
   } else fail(new Error(`Unexpected host output: ${line}`));
 });
-host.stdin.write(`1\n5 0 ${Buffer.from('hello.txt').toString('base64')}\n`);
+host.stdin.write(`1 1\n5 0 ${Buffer.from('hello.txt').toString('base64')}\n`);

@@ -13,7 +13,7 @@ function createWindowsVirtualClipboard({ executable, sendRequest, spawnProcess =
     if (previous) previous.child.kill();
   }
   function isActive() { return Boolean(active); }
-  async function publish(files) {
+  async function publish(files, { asyncMode = false } = {}) {
     if (!Array.isArray(files) || !files.length) throw new Error('Нет файлов для публикации.');
     const seen = new Set();
     const descriptors = files.map((file) => {
@@ -57,7 +57,7 @@ function createWindowsVirtualClipboard({ executable, sendRequest, spawnProcess =
         catch { clear(); }
       }
     });
-    child.stdin.write(`${descriptors.length}\n` + descriptors.map((file) => `${file.size} ${file.directory ? 1 : 0} ${Buffer.from(file.relative, 'utf8').toString('base64')}\n`).join(''));
+    child.stdin.write(`${descriptors.length}${asyncMode ? ' 1' : ''}\n` + descriptors.map((file) => `${file.size} ${file.directory ? 1 : 0} ${Buffer.from(file.relative, 'utf8').toString('base64')}\n`).join(''));
     return ready;
   }
   function activate(token) {
