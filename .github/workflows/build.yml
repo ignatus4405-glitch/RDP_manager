@@ -44,7 +44,13 @@ jobs:
 
       - name: Смоук-тесты сервера
         shell: bash
-        run: npm test
+        run: |
+          npm test > test.log 2>&1 || {
+            cat test.log
+            grep -A 30 '^not ok ' test.log | head -n 60 | sed 's/%/%25/g; s/\r/%0D/g; s/^/::error::/' || true
+            exit 1
+          }
+          cat test.log
 
       - name: Проверка нативного OLE-компонента
         if: runner.os == 'Windows'

@@ -26,7 +26,7 @@ test('SFTP panels navigate locally and transfer single files in both directions'
   const manager = createSshSession({ localStart: local, makeClient: () => new FakeClient(), verifyHost: async () => true, emit: (event) => { events.push(event); if (event.type === 'ready') ready(); }, confirmOverwrite: async (target, where) => { confirmations.push({ target, where }); return accept; } });
   const { id } = manager.open({ host: 'example.com', username: 'user', password: 'password', mode: 'sftp' }); await readyPromise;
   t.after(() => manager.close());
-  const listing = await manager.localList(id, null); assert.equal(listing.path, local); assert.equal(listing.parent, root);
+  const listing = await manager.localList(id, null); assert.equal(listing.path, await fs.realpath(local)); assert.equal(listing.parent, path.dirname(await fs.realpath(local)));
   assert.equal(listing.files.find((e) => e.name === 'folder').directory, true); assert.equal(listing.files.find((e) => e.name === 'upload.txt').file, true);
   assert.deepEqual(await manager.transferBetween(id, local, '/', 'upload.txt', 'upload'), { ok: true });
   assert.equal(await fs.readFile(path.join(remote, 'upload.txt'), 'utf8'), 'from local');
