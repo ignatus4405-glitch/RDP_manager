@@ -1,5 +1,6 @@
 #include "virtual-clipboard.h"
 #include <windows.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wincrypt.h>
 #include <algorithm>
