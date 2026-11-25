@@ -6,8 +6,10 @@
  *   RDP_MANAGER_HOME          — «домашний» каталог приложения (web/, data/). Для однофайловой сборки определяется автоматически
  *   RDP_MANAGER_SECRET        — секрет подписи токенов (по умолчанию генерируется в data/secret.key)
  *   RDP_MANAGER_ADMIN_PASSWORD — пароль учётной записи admin при первом запуске (по умолчанию admin123)
+ *   RDP_MANAGER_TLS_CERT / RDP_MANAGER_TLS_KEY — PEM-сертификат и закрытый ключ для HTTPS/WSS
  */
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const { installConsoleFileLogger } = require('./file-logger');
@@ -57,17 +59,23 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
 });
 
-const server = http.createServer(app);
+const certPath = process.env.RDP_MANAGER_TLS_CERT;
+const keyPath = process.env.RDP_MANAGER_TLS_KEY;
+if (Boolean(certPath) !== Boolean(keyPath)) throw new Error('Укажите оба параметра RDP_MANAGER_TLS_CERT и RDP_MANAGER_TLS_KEY.');
+const tlsEnabled = Boolean(certPath);
+const server = tlsEnabled ? https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath), minVersion: 'TLSv1.2' }, app) : http.createServer(app);
 // RDP-шлюз (RDCleanPath поверх WebSocket) для встроенных RDP-сессий в клиенте
 attachRdpGateway(server, { path: '/ws/rdp' });
 
 server.listen(PORT, HOST, () => {
   console.log('==============================================');
   console.log(`  RDP Manager Server  v${VERSION}`);
-  console.log(`  API:          http://${HOST}:${PORT}/api`);
-  console.log(`  RDP-шлюз:     ws://${HOST}:${PORT}/ws/rdp  (встроенный RDP в клиенте)`);
-  console.log(`  Веб-панель:   http://${HOST}:${PORT}/`);
-  if (webMode) console.log(`  Веб-режим:    http://${HOST}:${PORT}/app/  (клиент в браузере)`);
+  const scheme = tlsEnabled ? 'https' : 'http';
+  const wsScheme = tlsEnabled ? 'wss' : 'ws';
+  console.log(`  API:          ${scheme}://${HOST}:${PORT}/api`);
+  console.log(`  RDP-шлюз:     ${wsScheme}://${HOST}:${PORT}/ws/rdp  (встроенный RDP в клиенте)`);
+  console.log(`  Веб-панель:   ${scheme}://${HOST}:${PORT}/`);
+  if (webMode) console.log(`  Веб-режим:    ${scheme}://${HOST}:${PORT}/app/  (клиент в браузере)`);
   console.log(`  База данных:  ${DATA_DIR}`);
   if (seededAdmin) {
     console.log('----------------------------------------------');

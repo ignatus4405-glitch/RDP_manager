@@ -16,6 +16,9 @@ const { createClipboardReceiver, clipboardFingerprint } = require('./rdp-clipboa
 const { createRichClipboard } = require('./clipboard-rich');
 const { createWindowsVirtualClipboard } = require('./windows-virtual-clipboard');
 const { createWindowsLayoutHook } = require('./windows-layout-hook');
+const { createSshSession } = require('./ssh-session');
+const { createWebAppView } = require('./web-app-view');
+const webAppView = createWebAppView(() => mainWindow);
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -51,6 +54,17 @@ const layoutHook = createWindowsLayoutHook({
 const clipboardFileSource = createClipboardFileSource({ clipboard });
 const richClipboard = createRichClipboard({ clipboard, ClipboardItem });
 const clipboardReceiver = createClipboardReceiver({ clipboard, ClipboardItem, tempDirectory: app.getPath('temp') });
+const sshSession = createSshSession({
+  emit: (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ssh-event', event); },
+  verifyHost: async ({ host, port, fingerprint }) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    const result = await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Проверка ключа SSH-сервера', message: `Сверьте ключ сервера ${host}:${port}`, detail: `${fingerprint}\n\nСверьте отпечаток по доверенному каналу. Если он отличается или неизвестен — отмените подключение. Ключ подтверждается отдельно при каждом подключении.`, buttons: ['Отмена', 'Ключ совпадает'], defaultId: 0, cancelId: 0, noLink: true });
+    return result.response === 1;
+  },
+  chooseUpload: async () => { const result = await dialog.showOpenDialog(mainWindow, { title: 'Выберите файл для загрузки по SFTP', properties: ['openFile'] }); return result.canceled ? null : result.filePaths[0]; },
+  chooseDownload: async (name) => { const result = await dialog.showSaveDialog(mainWindow, { title: 'Сохранить файл SFTP', defaultPath: name }); return result.canceled ? null : result.filePath; },
+  confirmOverwrite: async (remote) => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Файл уже существует', message: `Перезаписать удалённый файл?`, detail: remote, buttons: ['Отмена', 'Перезаписать'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
+});
 const SERVER_SERVICE_NAME = 'RDPManagerServer';
 const GH_REPO = 'ignatus4405-glitch/RDP_manager';
 const GH_RELEASES_LATEST = `https://api.github.com/repos/${GH_REPO}/releases/latest`;
@@ -78,7 +92,7 @@ function createWindow() {
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.on('blur', () => { layoutFocusToken = null; layoutHook.stop(); });
-  mainWindow.on('closed', () => { layoutHook.stop(); mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); windowsVirtualClipboard.clear(); });
+  mainWindow.on('closed', () => { webAppView.close(); sshSession.close(); layoutHook.stop(); mainWindow = null; clipboardFileSource.reset(); fileWriter.cancelAll(); clipboardReceiver.cancelAll(); windowsVirtualClipboard.clear(); });
 }
 
 function createServerManagerWindow() {
@@ -266,7 +280,11 @@ function launchConnection(conn) {
   if (/[\r\n\x00-\x1f]/.test(address)) return { ok: false, message: 'Недопустимые символы в адресе' };
 
   try {
-    if (type === 'rdp') return launchRdp(address, Number(conn?.port) || 3389, conn?.username, name);
+    if (type === 'rdp') {
+      const username = String(conn?.username || '');
+      if (/[\r\n\x00-\x1f\x7f]/.test(username)) return { ok: false, message: 'Недопустимое имя пользователя RDP' };
+      return launchRdp(address, Number(conn?.port) || 3389, username, name);
+    }
     if (type === 'anydesk') return launchAnyDesk(address, name);
     if (type === 'rustdesk') return launchRustDesk(address, name);
     return { ok: false, message: `Неизвестный тип подключения: ${type}` };
@@ -376,6 +394,16 @@ ipcMain.on('rdp-layout-focus', (event, focused, token) => {
   const hwnd = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
   layoutHook.start(hwnd);
 });
+ipcMain.handle('web-app-open', (event, options) => { requireClientWindow(event); return webAppView.open(options); });
+ipcMain.handle('web-app-close', (event, id) => { requireClientWindow(event); if (typeof id === 'string') webAppView.close(id); });
+ipcMain.handle('web-app-bounds', (event, id, rect) => { requireClientWindow(event); webAppView.bounds(id, rect); });
+ipcMain.handle('web-app-action', (event, id, command) => { requireClientWindow(event); webAppView.action(id, command); });
+ipcMain.handle('ssh-open', (event, options) => { requireClientWindow(event); return sshSession.open(options); });
+ipcMain.handle('ssh-close', (event, id) => { requireClientWindow(event); if (typeof id === 'string') sshSession.close(id); });
+ipcMain.handle('ssh-write', (event, id, data) => { requireClientWindow(event); return sshSession.write(id, data); });
+ipcMain.handle('ssh-resize', (event, id, cols, rows) => { requireClientWindow(event); return sshSession.resize(id, cols, rows); });
+ipcMain.handle('ssh-list', (event, id, directory) => { requireClientWindow(event); return sshSession.list(id, directory); });
+ipcMain.handle('ssh-transfer', (event, id, remote, direction) => { requireClientWindow(event); return sshSession.transfer(id, remote, direction); });
 ipcMain.handle('rdp-virtual-available', (event) => { requireClientWindow(event); return process.platform === 'win32' && fs.existsSync(virtualClipboardExecutable); });
 ipcMain.handle('rdp-virtual-active', (event) => { requireClientWindow(event); return windowsVirtualClipboard.isActive(); });
 ipcMain.handle('rdp-virtual-publish', async (event, files, expectedFingerprint, asyncMode) => {

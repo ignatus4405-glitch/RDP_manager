@@ -5,12 +5,14 @@
  * изменение — только администраторам.
  */
 const express = require('express');
-const { db, hashPassword, verifyPassword } = require('./db');
+const { db, DATA_DIR, hashPassword, verifyPassword } = require('./db');
+const { createConnectionSecrets, secureSecretTransport } = require('./connection-secrets');
+const secrets = createConnectionSecrets({ db, dataDir: DATA_DIR });
 const { signToken, requireAuth, requireAdmin } = require('./auth');
 
 const router = express.Router();
 
-const VALID_TYPES = ['rdp', 'anydesk', 'rustdesk'];
+const VALID_TYPES = ['rdp', 'anydesk', 'rustdesk', 'ssh', 'sftp', 'web'];
 const VALID_ROLES = ['admin', 'employee'];
 const clean = (v, max = 500) => String(v ?? '').trim().slice(0, max);
 const likeEscape = (s) => String(s).replace(/[\\%_]/g, (m) => '\\' + m);
@@ -139,7 +141,7 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/connections', requireAuth, (req, res) => {
   const { search, category, type, tag } = req.query;
-  let sql = 'SELECT * FROM connections WHERE 1 = 1';
+  let sql = 'SELECT connections.*, EXISTS(SELECT 1 FROM connection_secrets WHERE connection_id = connections.id) AS has_secret FROM connections WHERE 1 = 1';
   const params = [];
 
   if (VALID_TYPES.includes(type)) { sql += ' AND type = ?'; params.push(type); }
@@ -171,8 +173,8 @@ router.post('/connections', requireAuth, requireAdmin, (req, res) => {
   const data = validateConnection(req.body);
   if (data.error) return res.status(400).json({ error: data.error });
   const info = db.prepare(
-    `INSERT INTO connections (type, name, address, port, category, tags, username, description, rustdesk_server, rustdesk_key, created_by)
-     VALUES (@type, @name, @address, @port, @category, @tags, @username, @description, @rustdesk_server, @rustdesk_key, @created_by)`
+    `INSERT INTO connections (type, name, address, port, category, tags, username, description, rustdesk_server, rustdesk_key, domain, created_by)
+     VALUES (@type, @name, @address, @port, @category, @tags, @username, @description, @rustdesk_server, @rustdesk_key, @domain, @created_by)`
   ).run({ ...data.value, created_by: req.user.id });
   const row = db.prepare('SELECT * FROM connections WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ connection: row });
@@ -184,13 +186,51 @@ router.put('/connections/:id', requireAuth, requireAdmin, (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Подключение не найдено' });
   const data = validateConnection({ ...existing, ...req.body });
   if (data.error) return res.status(400).json({ error: data.error });
-  db.prepare(
-    `UPDATE connections SET type=@type, name=@name, address=@address, port=@port, category=@category,
-       tags=@tags, username=@username, description=@description, rustdesk_server=@rustdesk_server, rustdesk_key=@rustdesk_key, updated_at = datetime('now')
-     WHERE id = @id`
-  ).run({ ...data.value, id });
+  // Changing the target or identity must not silently send an old password to
+  // another account or service. Keep the update and secret removal atomic.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(
+      `UPDATE connections SET type=@type, name=@name, address=@address, port=@port, category=@category,
+         tags=@tags, username=@username, description=@description, rustdesk_server=@rustdesk_server, rustdesk_key=@rustdesk_key, domain=@domain, updated_at = datetime('now')
+       WHERE id = @id`
+    ).run({ ...data.value, id });
+    if (['type', 'address', 'username', 'domain'].some((key) => (existing[key] || '') !== (data.value[key] || ''))) secrets.remove(id);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
   const row = db.prepare('SELECT * FROM connections WHERE id = ?').get(id);
   res.json({ connection: row });
+});
+
+// Passwords never appear in connection lists, search results or logs. A secret
+// is available to active authorized employees on an explicitly secure channel.
+function secretAccess(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  if (!secureSecretTransport(req)) return res.status(403).json({ error: 'Для паролей требуется HTTPS непосредственно к серверу или локальное подключение.' });
+  const user = db.prepare('SELECT role, disabled, must_change_password FROM users WHERE id = ?').get(req.user.id);
+  if (!user || user.disabled || user.must_change_password) return res.status(403).json({ error: 'Учётная запись недоступна или необходимо сменить пароль.' });
+  req.user.role = user.role;
+  next();
+}
+router.get('/connections/:id/secret', requireAuth, secretAccess, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || !db.prepare('SELECT id FROM connections WHERE id = ?').get(id)) return res.status(404).json({ error: 'Подключение не найдено' });
+  try { return res.json({ password: secrets.read(id) }); }
+  catch (error) { console.error('Не удалось расшифровать пароль подключения:', id); return res.status(500).json({ error: 'Не удалось открыть хранилище паролей.' }); }
+});
+router.put('/connections/:id/secret', requireAuth, secretAccess, requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || !db.prepare('SELECT id FROM connections WHERE id = ?').get(id)) return res.status(404).json({ error: 'Подключение не найдено' });
+  const password = req.body?.password;
+  if (typeof password !== 'string' || !password || Buffer.byteLength(password, 'utf8') > 8192) return res.status(400).json({ error: 'Укажите пароль длиной до 8192 байт.' });
+  try { secrets.save(id, password); return res.json({ ok: true }); }
+  catch (error) { console.error('Не удалось сохранить пароль подключения:', id); return res.status(500).json({ error: 'Не удалось сохранить пароль подключения.' }); }
+});
+router.delete('/connections/:id/secret', requireAuth, secretAccess, requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || !db.prepare('SELECT id FROM connections WHERE id = ?').get(id)) return res.status(404).json({ error: 'Подключение не найдено' });
+  secrets.remove(id);
+  return res.json({ ok: true });
 });
 
 router.delete('/connections/:id', requireAuth, requireAdmin, (req, res) => {
@@ -211,18 +251,27 @@ function normalizeTags(tags) {
 
 function validateConnection(body) {
   const type = clean(body.type, 20);
-  if (!VALID_TYPES.includes(type)) return { error: 'Тип должен быть: rdp, anydesk или rustdesk' };
+  if (!VALID_TYPES.includes(type)) return { error: 'Тип должен быть: rdp, anydesk, rustdesk, ssh, sftp или web' };
   const name = clean(body.name, 200);
   const address = clean(body.address, 300);
   if (!name) return { error: 'Укажите название' };
   if (!address) return { error: 'Укажите адрес / ID' };
+  if (type === 'web') {
+    let url; try { url = new URL(address); } catch { return { error: 'Укажите полный HTTPS-адрес веб-приложения.' }; }
+    if (url.protocol !== 'https:' || url.username || url.password || /[\x00-\x20\x7f]/.test(address)) return { error: 'Веб-приложению требуется HTTPS-адрес без логина и пароля.' };
+  }
 
   let port = body.port === null || body.port === undefined || body.port === '' ? null : Number(body.port);
   if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) {
     return { error: 'Порт должен быть целым числом от 1 до 65535' };
   }
-  if (type !== 'rdp') port = null; // у AnyDesk / RustDesk порт не используется
+  if (!['rdp', 'ssh', 'sftp'].includes(type)) port = null;
   if (type === 'rdp' && port === null) port = 3389;
+  if ((type === 'ssh' || type === 'sftp') && port === null) port = 22;
+  if ((type === 'ssh' || type === 'sftp') && (/[\s\/@?#\x00-\x1f]/.test(address) || address.length > 253)) return { error: 'Укажите имя или IP SSH-сервера без порта и протокола.' };
+
+  const domain = type === 'rdp' ? clean(body.domain, 150) : '';
+  if (/[\x00-\x1f\x7f\\/@]/.test(domain)) return { error: 'Недопустимое имя домена RDP.' };
 
   const rustdesk_server = type === 'rustdesk' ? clean(body.rustdesk_server, 300) : '';
   const rustdesk_key = type === 'rustdesk' ? clean(body.rustdesk_key, 128) : '';
@@ -243,6 +292,7 @@ function validateConnection(body) {
       category: clean(body.category, 100) || 'Общее',
       tags: normalizeTags(body.tags),
       username: clean(body.username, 150),
+      domain,
       description: clean(body.description, 2000),
       rustdesk_server,
       rustdesk_key,

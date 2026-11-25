@@ -18,7 +18,7 @@ const state = {
   currentDocId: null,
 };
 
-const TYPE_LABEL = { rdp: 'RDP', anydesk: 'AnyDesk', rustdesk: 'RustDesk' };
+const TYPE_LABEL = { rdp: 'RDP', anydesk: 'AnyDesk', rustdesk: 'RustDesk', ssh: 'SSH', sftp: 'SFTP', web: 'Веб' };
 
 /* ================= Утилиты ================= */
 const $ = (id) => document.getElementById(id);
@@ -36,6 +36,7 @@ function toast(message, isError = false) {
 async function api(path, opts = {}) {
   const res = await fetch(state.serverUrl + '/api' + path, {
     method: opts.method || 'GET',
+    ...(opts.noStore ? { cache: 'no-store' } : {}),
     headers: {
       'Content-Type': 'application/json',
       ...(state.token ? { Authorization: 'Bearer ' + state.token } : {}),
@@ -113,6 +114,9 @@ async function doLogin() {
 
 function logout() {
   window.closeEmbeddedRustDesk?.();
+  window.closeEmbeddedSsh?.();
+  window.closeEmbeddedWeb?.();
+  if (!$('rdpOverlay').classList.contains('hidden')) closeEmbeddedRdp();
   state.token = null; state.user = null;
   sessionStorage.removeItem('rdp_token');
   $('appView').classList.add('hidden');
@@ -171,13 +175,16 @@ async function loadMeta() {
       state.meta.tags.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
     tagSel.value = curTag || '';
 
-    const counts = { rdp: 0, anydesk: 0, rustdesk: 0 };
+    const counts = { rdp: 0, anydesk: 0, rustdesk: 0, ssh: 0, sftp: 0, web: 0 };
     for (const row of state.meta.typeCounts) counts[row.type] = row.count;
-    const total = counts.rdp + counts.anydesk + counts.rustdesk;
+    const total = counts.rdp + counts.anydesk + counts.rustdesk + counts.ssh + counts.sftp + counts.web;
     $('cntAll').textContent = total || '';
     $('cntRdp').textContent = counts.rdp || '';
     $('cntAnydesk').textContent = counts.anydesk || '';
     $('cntRustdesk').textContent = counts.rustdesk || '';
+    $('cntSsh').textContent = counts.ssh || '';
+    $('cntSftp').textContent = counts.sftp || '';
+    $('cntWeb').textContent = counts.web || '';
   } catch (err) { /* метаданные не критичны */ }
 }
 
@@ -276,6 +283,8 @@ const rdpSession = {
 };
 
 let rdpConnectionAttempt = 0;
+let rdpCredentialGeneration = 0;
+$('rdpPassword').addEventListener('input', () => { rdpCredentialGeneration++; });
 let rdpLayoutFocusToken = 0;
 let releaseRdpKeys = () => {};
 
@@ -358,11 +367,13 @@ function rdpErrorText(err) {
 }
 
 function openEmbeddedRdp(conn) {
+  const credentialGeneration = ++rdpCredentialGeneration;
   rdpSession.conn = conn;
   $('rdpConnName').textContent = conn.name || conn.address;
   $('rdpConnAddr').textContent = rdpConnAddress(conn);
   $('rdpFormName').textContent = conn.name || conn.address;
   $('rdpUsername').value = conn.username || '';
+  $('rdpDomain').value = conn.domain || '';
   $('rdpPassword').value = '';
   $('rdpFormError').textContent = '';
   $('rdpScreenHint').textContent = 'Подключение…';
@@ -373,6 +384,13 @@ function openEmbeddedRdp(conn) {
   $('rdpDisconnectBtn').disabled = true;
   $('rdpOverlay').classList.remove('hidden');
   setTimeout(() => $('rdpPassword').focus(), 60);
+  if (conn.has_secret && window.canSendConnectionSecret(state.serverUrl)) {
+    // Never overwrite text entered by the user or a subsequently opened card.
+    const selected = conn;
+    api('/connections/' + conn.id + '/secret', { noStore: true }).then(({ password }) => {
+      if (rdpCredentialGeneration === credentialGeneration && rdpSession.conn === selected && !$('rdpOverlay').classList.contains('hidden') && !$('rdpPassword').value && typeof password === 'string') $('rdpPassword').value = password;
+    }).catch(() => { if (rdpCredentialGeneration === credentialGeneration && rdpSession.conn === selected) $('rdpFormError').textContent = 'Не удалось получить сохранённый пароль; введите его вручную.'; });
+  } else if (conn.has_secret) $('rdpFormError').textContent = 'Для сохранённого пароля подключитесь к серверу по HTTPS или введите пароль вручную.';
 }
 
 function teardownRdpSession() {
@@ -397,6 +415,9 @@ function teardownRdpSession() {
 }
 
 function closeEmbeddedRdp() {
+  rdpCredentialGeneration++;
+  $('rdpPassword').value = '';
+  rdpSession.conn = null;
   teardownRdpSession();
   const canvas = $('rdpCanvas');
   const ctx = canvas.getContext('2d');
@@ -730,9 +751,13 @@ function attachRdpInputOnce() {
 }
 
 async function startEmbeddedRdp() {
+  rdpCredentialGeneration++; // Do not insert a late saved password into an active/new attempt.
   const conn = rdpSession.conn;
   if (!conn) return;
-  const username = $('rdpUsername').value.trim();
+  let credentials;
+  try { credentials = window.rdpCredentials($('rdpUsername').value, $('rdpDomain').value); }
+  catch (error) { $('rdpFormError').textContent = error.message; return; }
+  const username = credentials.username;
   const password = $('rdpPassword').value;
   const formError = $('rdpFormError');
   formError.textContent = '';
@@ -777,6 +802,7 @@ async function startEmbeddedRdp() {
     const enableDisplayControl = new IronRDP.Extension('display_control', true);
     const builder = new IronRDP.SessionBuilder();
     builder.username(username);
+    if (credentials.domain) builder.serverDomain(credentials.domain);
     builder.password(password);
     builder.destination(destination);
     builder.proxyAddress(rdpGatewayUrl());
@@ -944,7 +970,10 @@ $('rdpExternalBtn').addEventListener('click', () => {
   const conn = rdpSession.conn;
   if (!conn) return;
   if (window.rdpManager?.launch) {
-    window.rdpManager.launch({ type: 'rdp', name: conn.name, address: conn.address, port: conn.port, username: conn.username })
+    let username;
+    try { username = window.rdpCredentials($('rdpUsername').value, $('rdpDomain').value).qualifiedUsername; }
+    catch (error) { toast(error.message, true); return; }
+    window.rdpManager.launch({ type: 'rdp', name: conn.name, address: conn.address, port: conn.port, username })
       .then((r) => toast(r.message, !r.ok));
   } else {
     toast('Внешний запуск доступен в десктоп-приложении', true);
@@ -959,6 +988,22 @@ async function launchConnection(conn, btn) {
   }
   if (conn.type === 'rustdesk') {
     window.openEmbeddedRustDesk(conn);
+    return;
+  }
+  if (conn.type === 'web') {
+    if (!window.rdpManager?.webApp) { toast('Встроенные веб-приложения доступны только в десктоп-клиенте.', true); return; }
+    window.openEmbeddedWeb(conn, async () => {
+      if (!window.canSendConnectionSecret(state.serverUrl)) throw new Error('Для сохранённого пароля требуется HTTPS.');
+      return (await api('/connections/' + conn.id + '/secret', { noStore: true })).password;
+    });
+    return;
+  }
+  if (conn.type === 'ssh' || conn.type === 'sftp') {
+    if (!window.rdpManager?.ssh) { toast('SSH/SFTP доступен только в десктоп-клиенте.', true); return; }
+    window.openEmbeddedSsh(conn, async () => {
+      if (!window.canSendConnectionSecret(state.serverUrl)) throw new Error('Для сохранённого пароля требуется HTTPS.');
+      return (await api('/connections/' + conn.id + '/secret', { noStore: true })).password;
+    });
     return;
   }
   if (window.rdpManager?.launch) {
@@ -1016,6 +1061,9 @@ function openConnectionModal(conn) {
       <option value="rdp" ${c.type === 'rdp' ? 'selected' : ''}>RDP (mstsc / FreeRDP)</option>
       <option value="anydesk" ${c.type === 'anydesk' ? 'selected' : ''}>AnyDesk (ID, напр. 123 456 789)</option>
       <option value="rustdesk" ${c.type === 'rustdesk' ? 'selected' : ''}>RustDesk (ID)</option>
+      <option value="ssh" ${c.type === 'ssh' ? 'selected' : ''}>SSH (терминал)</option>
+      <option value="sftp" ${c.type === 'sftp' ? 'selected' : ''}>SFTP (файлы)</option>
+      <option value="web" ${c.type === 'web' ? 'selected' : ''}>Веб-приложение (HTTPS)</option>
     </select>
     <div id="fRustDeskConfig" class="hidden">
       <label for="fRustDeskServer">Сервер ID RustDesk *</label>
@@ -1031,8 +1079,8 @@ function openConnectionModal(conn) {
         <input id="fAddress" value="${esc(c.address)}" placeholder="192.168.0.11 или 123 456 789" spellcheck="false" />
       </div>
       <div id="fPortWrap">
-        <label>Порт RDP</label>
-        <input id="fPort" type="number" min="1" max="65535" value="${c.port ?? 3389}" />
+        <label id="fPortLabel">Порт</label>
+        <input id="fPort" type="number" min="1" max="65535" value="${c.port ?? (c.type === 'ssh' || c.type === 'sftp' ? 22 : 3389)}" />
       </div>
     </div>
     <div class="form-row">
@@ -1048,6 +1096,16 @@ function openConnectionModal(conn) {
     </div>
     <label>Имя пользователя (необязательно)</label>
     <input id="fUsername" value="${esc(c.username)}" placeholder="administrator" autocomplete="off" spellcheck="false" />
+    <div id="fDomainWrap" class="hidden">
+      <label for="fDomain">Домен RDP (необязательно)</label>
+      <input id="fDomain" value="${esc(c.domain || '')}" placeholder="DOMAIN" autocomplete="off" spellcheck="false" />
+    </div>
+    <div id="fSecretWrap" class="hidden">
+      <label for="fPassword">Пароль подключения (необязательно)</label>
+      <input id="fPassword" type="password" value="" placeholder="${c.has_secret ? 'Оставьте пустым, чтобы сохранить прежний' : 'Не сохраняется, если пусто'}" autocomplete="new-password" />
+      ${c.has_secret ? '<label><input id="fClearPassword" type="checkbox" /> Удалить сохранённый пароль</label>' : ''}
+      <p class="muted tiny">Сохранение и получение пароля доступны только по HTTPS или непосредственно с этого компьютера. Доступен всем активным сотрудникам.</p>
+    </div>
     <label>Описание</label>
     <input id="fDescription" value="${esc(c.description)}" placeholder="Краткое пояснение для коллег" />
   `, [
@@ -1059,18 +1117,34 @@ function openConnectionModal(conn) {
           type: $('fType').value,
           name: $('fName').value.trim(),
           address: $('fAddress').value.trim(),
-          port: $('fType').value === 'rdp' ? Number($('fPort').value) || 3389 : null,
+          port: ['rdp', 'ssh', 'sftp'].includes($('fType').value) ? Number($('fPort').value) || ($('fType').value === 'rdp' ? 3389 : 22) : null,
           category: $('fCategory').value.trim() || 'Общее',
           tags: $('fTags').value.trim(),
           username: $('fUsername').value.trim(),
+          domain: $('fType').value === 'rdp' ? $('fDomain').value.trim() : '',
           description: $('fDescription').value.trim(),
           rustdesk_server: $('fType').value === 'rustdesk' ? $('fRustDeskServer').value.trim() : '',
           rustdesk_key: $('fType').value === 'rustdesk' ? $('fRustDeskKey').value.trim() : '',
         };
+        const newPassword = ['rdp', 'ssh', 'sftp', 'web'].includes(payload.type) ? $('fPassword').value : '';
+        const clearPassword = ['rdp', 'ssh', 'sftp', 'web'].includes(payload.type) && Boolean($('fClearPassword')?.checked);
+        if (newPassword && clearPassword) { toast('Укажите новый пароль или выберите удаление, но не оба действия.', true); return; }
+        if (isEdit && c.has_secret && !newPassword && !clearPassword && ['type', 'address', 'username', 'domain'].some((key) => (c[key] || '') !== (payload[key] || '')) && !confirm('Адрес, тип или учётная запись изменились. Сохранённый пароль будет удалён. Продолжить?')) return;
+        if ((newPassword || clearPassword) && !window.canSendConnectionSecret(state.serverUrl)) { toast('Для хранения пароля подключитесь к серверу по HTTPS.', true); return; }
         try {
           if (payload.type === 'rustdesk') window.RustDeskConfig.directRustDeskConfig({ server: payload.rustdesk_server, publicKey: payload.rustdesk_key });
-          if (isEdit) await api('/connections/' + c.id, { method: 'PUT', body: payload });
-          else await api('/connections', { method: 'POST', body: payload });
+          const result = isEdit ? await api('/connections/' + c.id, { method: 'PUT', body: payload }) : await api('/connections', { method: 'POST', body: payload });
+          const id = isEdit ? c.id : result.connection.id;
+          if (newPassword || clearPassword) {
+            try {
+              if (newPassword) await api('/connections/' + id + '/secret', { method: 'PUT', body: { password: newPassword }, noStore: true });
+              else await api('/connections/' + id + '/secret', { method: 'DELETE', noStore: true });
+            } catch (error) {
+              closeModal(); loadConnections();
+              toast(`Карточка сохранена, но пароль не изменён: ${error.message}`, true);
+              return;
+            }
+          }
           closeModal();
           toast(isEdit ? 'Подключение сохранено' : 'Подключение создано');
           loadConnections();
@@ -1080,10 +1154,18 @@ function openConnectionModal(conn) {
   ]);
 
   const syncPortVisibility = () => {
-    $('fPortWrap').style.visibility = $('fType').value === 'rdp' ? 'visible' : 'hidden';
+    $('fPortWrap').style.visibility = ['rdp', 'ssh', 'sftp'].includes($('fType').value) ? 'visible' : 'hidden';
+    $('fPortLabel').textContent = $('fType').value === 'rdp' ? 'Порт RDP' : 'Порт SSH';
     $('fRustDeskConfig').classList.toggle('hidden', $('fType').value !== 'rustdesk');
+    $('fDomainWrap').classList.toggle('hidden', $('fType').value !== 'rdp');
+    $('fSecretWrap').classList.toggle('hidden', !['rdp', 'ssh', 'sftp', 'web'].includes($('fType').value));
   };
-  $('fType').addEventListener('change', syncPortVisibility);
+  let previousType = $('fType').value;
+  $('fType').addEventListener('change', () => {
+    const next = $('fType').value;
+    if ((next === 'rdp' && previousType !== 'rdp') || (['ssh', 'sftp'].includes(next) && !['ssh', 'sftp'].includes(previousType))) $('fPort').value = next === 'rdp' ? '3389' : '22';
+    previousType = next; syncPortVisibility();
+  });
   syncPortVisibility();
 }
 

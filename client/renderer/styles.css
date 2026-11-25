@@ -309,3 +309,15 @@ button { font-family: inherit; cursor: pointer; }
 .dot.rdp { background: var(--rdp); }
 
 .rustdesk-viewer { width: 100%; height: 100%; min-width: 0; min-height: 0; background: #000; }
+
+/* SSH terminal and SFTP file list */
+.conn-type.ssh, .conn-type.sftp { background: #60a5fa22; color: #93c5fd; border: 1px solid #60a5fa44; }
+.ssh-terminal { width: 100%; height: 100%; padding: 12px; background: #000; overflow: hidden; }
+.sftp-panel { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 16px; gap: 12px; overflow: hidden; }
+.sftp-toolbar { display: flex; gap: 8px; align-items: center; }
+.sftp-toolbar input { flex: 1; min-width: 0; }
+.sftp-list { overflow: auto; flex: 1; }
+.sftp-list table { width: 100%; border-collapse: collapse; }
+.sftp-list th, .sftp-list td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+
+.conn-type.web { background: #a78bfa22; color: #c4b5fd; border: 1px solid #a78bfa44; }
