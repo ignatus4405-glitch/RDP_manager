@@ -8,7 +8,8 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { fileURLToPath } = require('node:url');
+const { fileURLToPath, pathToFileURL } = require('node:url');
+const { Blob } = require('node:buffer');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
 const { createRdpFileWriter } = require('./rdp-file-writer');
@@ -55,6 +56,7 @@ const layoutHook = createWindowsLayoutHook({
 const clipboardFileSource = createClipboardFileSource({ clipboard });
 const richClipboard = createRichClipboard({ clipboard, ClipboardItem });
 const clipboardReceiver = createClipboardReceiver({ clipboard, ClipboardItem, tempDirectory: app.getPath('temp') });
+const sftpClipboardDirectories = new Set();
 const sshSession = createSshSession({
   emit: (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ssh-event', event); },
   verifyHost: async ({ host, port, fingerprint }) => {
@@ -74,6 +76,13 @@ const sshSession = createSshSession({
     if (urls.length > 128) throw new Error('За один раз можно вставить до 128 файлов.');
     return urls.map((url) => fileURLToPath(url));
   },
+  confirmDelete: async ({ side, target, directory }) => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Удаление', message: `Удалить ${directory ? 'пустую папку' : 'объект'}?`, detail: `${side === 'local' ? 'На компьютере' : 'На сервере'}: ${target}\n\nУдаление необратимо. Непустые папки не удаляются.`, buttons: ['Отмена', 'Удалить'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
+  stageFile: async (name) => {
+    const dir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'rdpm-sftp-'));
+    let retained = false;
+    return { file: path.join(dir, name), keep: () => { retained = true; sftpClipboardDirectories.add(dir); }, discard: () => retained ? Promise.resolve() : fs.promises.rm(dir, { recursive: true, force: true }) };
+  },
+  publishFile: async (file) => { await clipboard.write([new ClipboardItem({ 'text/uri-list': new Blob([pathToFileURL(file).href + '\r\n'], { type: 'text/uri-list' }) })]); },
   localStart: app.getPath('documents'),
   confirmOverwrite: async (target, location = 'remote') => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Файл уже существует', message: location === 'local' ? 'Перезаписать локальный файл?' : 'Перезаписать удалённый файл?', detail: target, buttons: ['Отмена', 'Перезаписать'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
 });
@@ -418,6 +427,7 @@ ipcMain.handle('ssh-list', (event, id, directory) => { requireClientWindow(event
 ipcMain.handle('ssh-properties-open', (event, id, side, dir, name) => { requireClientWindow(event); return sshSession.propertiesOpen(id, side, dir, name); });
 ipcMain.handle('ssh-properties-save', (event, id, token, changes) => { requireClientWindow(event); return sshSession.propertiesSave(id, token, changes); });
 ipcMain.handle('ssh-properties-reset', (event, id) => { requireClientWindow(event); if (typeof id === 'string') sshSession.propertiesReset(id); });
+ipcMain.handle('ssh-operate', (event, id, side, directory, name, action, value) => { requireClientWindow(event); return sshSession.operate(id, side, directory, name, action, value); });
 ipcMain.handle('ssh-editor-open', (event, id, side, dir, name) => { requireClientWindow(event); return sshSession.editorOpen(id, side, dir, name); });
 ipcMain.handle('ssh-editor-save', (event, id, token, text) => { requireClientWindow(event); return sshSession.editorSave(id, token, text); });
 ipcMain.handle('ssh-editor-reset', (event, id) => { requireClientWindow(event); if (typeof id === 'string') sshSession.editorReset(id); });
@@ -530,6 +540,8 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  for (const dir of sftpClipboardDirectories) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
+  sftpClipboardDirectories.clear();
   allowServerManagerQuit = true;
   if (serverManagerTray) {
     serverManagerTray.destroy();

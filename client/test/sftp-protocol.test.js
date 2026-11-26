@@ -8,23 +8,27 @@ const path = require('node:path');
 const { Server } = require('ssh2');
 const { createSshSession } = require('../ssh-session');
 
-test('two-pane transfers use a real SFTP protocol connection', { timeout: 15000 }, async (t) => {
+test('two-pane transfers use a real SFTP protocol connection', { timeout: 60000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sftp-protocol-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, 'upload.txt'), 'local data');
-  const files = new Map([['/download.txt', Buffer.from('remote data')]]), handles = new Map(), links = new Map(); let serial = 0, lastSetstat = null;
+  const files = new Map([['/download.txt', Buffer.from('remote data')]]), dirs = new Set(['/']), handles = new Map(), links = new Map(); let serial = 0, lastSetstat = null;
   const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
   const server = new Server({ hostKeys: [privateKey] }, (client) => {
     client.on('error', () => {}); client.on('authentication', (ctx) => ctx.method === 'password' ? ctx.accept() : ctx.reject());
     client.on('ready', () => client.on('session', (accept) => accept().on('sftp', (accept) => {
       const s = accept(); const attrs = (file) => ({ mode: 0o100644, size: file.length, uid: 0, gid: 0, atime: 1, mtime: 1 });
       const idOf = (handle) => handle.toString();
+      const dirAttrs = () => ({ mode: 0o40755, size: 0, uid: 0, gid: 0, atime: 1, mtime: 1 });
+      const stat = (id, name) => dirs.has(name) ? s.attrs(id, dirAttrs()) : links.has(name) ? s.attrs(id, { mode: 0o120777, size: 0, uid: 0, gid: 0, atime: 1, mtime: 1 }) : files.has(name) ? s.attrs(id, attrs(files.get(name))) : s.status(id, 2);
       s.on('REALPATH', (id) => s.name(id, { filename: '/' }));
       s.on('SYMLINK', (id, name, target) => { if (files.has(name) || links.has(name)) return s.status(id, 4); links.set(name, target); s.status(id, 0); });
-      s.on('MKDIR', (id, name) => { files.set(name, Buffer.alloc(0)); s.status(id, 0); });
-      s.on('LSTAT', (id, name) => files.has(name) ? s.attrs(id, attrs(files.get(name))) : s.status(id, 2));
-      s.on('STAT', (id, name) => files.has(name) ? s.attrs(id, attrs(files.get(name))) : s.status(id, 2));
-      s.on('OPENDIR', (id) => { const key = String(++serial); handles.set(key, { dir: true }); s.handle(id, Buffer.from(key)); });
-      s.on('READDIR', (id, handle) => { const h = handles.get(idOf(handle)); if (h.read) return s.status(id, 1); h.read = true; s.name(id, [...files].map(([name, content]) => ({ filename: name.slice(1), longname: name.slice(1), attrs: attrs(content) }))); });
+      s.on('RENAME', (id, from, to) => { if (!files.has(from)) return s.status(id, 2); if (files.has(to)) return s.status(id, 4); files.set(to, files.get(from)); files.delete(from); s.status(id, 0); });
+      s.on('REMOVE', (id, name) => { if (!files.has(name)) return s.status(id, 2); files.delete(name); s.status(id, 0); });
+      s.on('MKDIR', (id, name) => { if (dirs.has(name) || files.has(name) || links.has(name)) return s.status(id, 4); dirs.add(name); s.status(id, 0); });
+      s.on('LSTAT', stat);
+      s.on('STAT', stat);
+      s.on('OPENDIR', (id, name) => { if (!dirs.has(name)) return s.status(id, 2); const key = String(++serial); handles.set(key, { dir: name }); s.handle(id, Buffer.from(key)); });
+      s.on('READDIR', (id, handle) => { const h = handles.get(idOf(handle)); if (h.read) return s.status(id, 1); h.read = true; const prefix = h.dir === '/' ? '/' : h.dir + '/'; const entries = [...files].filter(([name]) => name.startsWith(prefix) && !name.slice(prefix.length).includes('/')).map(([name, content]) => ({ filename: name.slice(prefix.length), longname: name.slice(prefix.length), attrs: attrs(content) })); for (const name of dirs) if (name !== h.dir && name.startsWith(prefix) && !name.slice(prefix.length).includes('/')) entries.push({ filename: name.slice(prefix.length), longname: name.slice(prefix.length), attrs: dirAttrs() }); for (const name of links.keys()) if (name.startsWith(prefix) && !name.slice(prefix.length).includes('/')) entries.push({ filename: name.slice(prefix.length), longname: name.slice(prefix.length), attrs: { mode: 0o120777, size: 0, uid: 0, gid: 0, atime: 1, mtime: 1 } }); if (entries.length) s.name(id, entries); else s.status(id, 1); });
       s.on('OPEN', (id, name, flags) => { const write = Boolean(flags & 2); if (!(flags & 8) && !files.has(name)) return s.status(id, 2); if ((flags & 32) && (files.has(name) || links.has(name))) return s.status(id, 4); if (write && (flags & 16)) files.set(name, Buffer.alloc(0)); const key = String(++serial); handles.set(key, { name }); s.handle(id, Buffer.from(key)); });
       s.on('SETSTAT', (id, name, attrs) => { lastSetstat = { name, mode: attrs.mode, uid: attrs.uid, gid: attrs.gid }; s.status(id, 0); });
       s.on('FSETSTAT', (id, handle, attrs) => { const h = handles.get(idOf(handle)); const old = files.get(h.name), result = Buffer.alloc(attrs.size); old.copy(result); files.set(h.name, result); s.status(id, 0); });
@@ -36,7 +40,8 @@ test('two-pane transfers use a real SFTP protocol connection', { timeout: 15000 
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   let ready, rejectReady; const readyPromise = new Promise((resolve, reject) => { ready = resolve; rejectReady = reject; });
-  const ssh = createSshSession({ localStart: root, verifyHost: async () => true, confirmOverwrite: async () => true, emit: (event) => { if (event.type === 'ready') ready(); if (event.type === 'error') rejectReady(new Error(event.message)); } });
+  let clipboardFile = null;
+  const ssh = createSshSession({ localStart: root, stageFile: async (name) => { const dir = await fs.mkdtemp(path.join(root, 'clipboard-')); return { file: path.join(dir, name), keep() {}, discard: () => fs.rm(dir, { recursive: true, force: true }) }; }, publishFile: async (file) => { clipboardFile = file; }, verifyHost: async () => true, confirmOverwrite: async () => true, confirmDelete: async () => true, emit: (event) => { if (event.type === 'ready') ready(); if (event.type === 'error') rejectReady(new Error(event.message)); } });
   t.after(() => { ssh.close(); server.close(); });
   const { id } = ssh.open({ host: '127.0.0.1', port: server.address().port, username: 'user', password: 'pass', mode: 'sftp' }); await readyPromise;
   const listing = await ssh.list(id, '.'); assert.equal(listing.path, '/'); assert.equal(listing.files[0].name, 'download.txt'); assert.equal(listing.files[0].file, true);
@@ -49,7 +54,17 @@ test('two-pane transfers use a real SFTP protocol connection', { timeout: 15000 
   await assert.rejects(ssh.editorSave(id, edit.token, 'my version'), /изменён извне/i); assert.equal(files.get('/edit.txt').toString(), 'changed');
   files.set('/binary', Buffer.from([0, 1, 2])); await assert.rejects(ssh.editorOpen(id, 'remote', '/', 'binary'), /двоичные/i);
   files.delete('/edit.txt'); files.delete('/binary');
-  await ssh.createDirectory(id, 'remote', '/', 'new-folder'); assert.ok(files.has('/new-folder'));
+  dirs.add('/folder'); dirs.add('/folder/sub'); dirs.add('/folder/empty'); files.set('/folder/sub/a.txt', Buffer.from('nested'));
+  await ssh.operate(id, 'remote', '/', 'folder', 'clipboard'); assert.equal(await fs.readFile(path.join(clipboardFile, 'sub', 'a.txt'), 'utf8'), 'nested'); assert.equal((await fs.stat(path.join(clipboardFile, 'empty'))).isDirectory(), true);
+  await ssh.operate(id, 'remote', '/', 'folder', 'duplicate', 'folder-copy'); assert.equal(files.get('/folder-copy/sub/a.txt').toString(), 'nested'); assert.ok(dirs.has('/folder-copy/empty'));
+  await assert.rejects(ssh.operate(id, 'remote', '/', 'folder', 'duplicate', 'folder-copy'), /существует/i);
+  links.set('/folder/link', '/download.txt'); const previous = clipboardFile; await assert.rejects(ssh.operate(id, 'remote', '/', 'folder', 'clipboard'), /ссылки/i); assert.equal(clipboardFile, previous); links.delete('/folder/link');
+  await ssh.operate(id, 'remote', '/', 'download.txt', 'clipboard'); assert.equal(await fs.readFile(clipboardFile, 'utf8'), 'remote data');
+  await ssh.operate(id, 'remote', '/', 'download.txt', 'duplicate', 'duplicate.txt'); assert.equal(files.get('/duplicate.txt').toString(), 'remote data');
+  await assert.rejects(ssh.operate(id, 'remote', '/', 'download.txt', 'duplicate', 'duplicate.txt'), /существует/i);
+  await ssh.operate(id, 'remote', '/', 'duplicate.txt', 'rename', 'renamed.txt'); assert.equal(files.get('/renamed.txt').toString(), 'remote data');
+  await ssh.operate(id, 'remote', '/', 'renamed.txt', 'delete'); assert.equal(files.has('/renamed.txt'), false);
+  await ssh.createDirectory(id, 'remote', '/', 'new-folder'); assert.ok(dirs.has('/new-folder'));
   await ssh.createFile(id, 'remote', '/', 'new-file'); assert.equal(files.get('/new-file').length, 0);
   await assert.rejects(ssh.createFile(id, 'remote', '/', 'download.txt')); assert.equal(files.get('/download.txt').toString(), 'remote data');
   await ssh.createLink(id, 'remote', '/', 'my-link', '../target'); assert.equal(links.get('/my-link'), '../target');

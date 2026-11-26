@@ -291,6 +291,14 @@
           <div class="sftp-dialog-actions"><button id="sftpNewFolderCancel" type="button" class="btn-ghost">Отмена</button><button id="sftpNewFolderCreate" type="submit" class="btn-primary">Создать</button></div>
         </form>
       </dialog>
+      <dialog id="sftpOperationDialog" class="sftp-dialog" aria-labelledby="sftpOperationTitle">
+        <form id="sftpOperationForm">
+          <h3 id="sftpOperationTitle">Действие с объектом</h3><p id="sftpOperationLocation" class="muted tiny"></p>
+          <label id="sftpOperationLabel" for="sftpOperationValue">Имя</label><input id="sftpOperationValue" maxlength="4096" autocomplete="off" required />
+          <p id="sftpOperationHint" class="muted tiny"></p><p id="sftpOperationError" class="login-error" role="alert"></p>
+          <div class="sftp-dialog-actions"><button id="sftpOperationCancel" class="btn-ghost" type="button">Отмена</button><button id="sftpOperationSubmit" class="btn-primary" type="submit">Применить</button></div>
+        </form>
+      </dialog>
       <dialog id="sftpPropertiesDialog" class="sftp-dialog sftp-properties-dialog" aria-labelledby="sftpPropertiesTitle">
         <form id="sftpPropertiesForm">
           <h3 id="sftpPropertiesTitle">Свойства</h3>

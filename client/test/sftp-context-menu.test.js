@@ -35,11 +35,12 @@ test('SFTP context menus select a right-clicked file and perform actual actions'
   const elements = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map((match) => [match[1], new Element(match[1])]));
   elements.sftpPanel.classList.add('hidden');
   const document = new Element(); document.getElementById = (id) => elements[id] || null; document.createElement = (name) => new Element(name); document.createTextNode = (text) => ({ textContent: text });
-  let onEvent, copied = '', transfers = [], folders = [], files = [], links = [], pastes = [], saves = [], propertySaves = [], confirmClose = false;
+  let onEvent, copied = '', transfers = [], folders = [], files = [], links = [], pastes = [], saves = [], propertySaves = [], operations = [], confirmClose = false;
   const ssh = {
     onEvent(callback) { onEvent = callback; }, close: async () => {}, open: async () => ({ id: 'session' }),
     localList: async () => ({ path: '/local', parent: '/', files: [{ name: 'photo.txt', file: true, size: 5 }] }),
     list: async () => ({ path: '/home', files: [{ name: 'docs', directory: true }] }),
+    operate: async (...args) => { operations.push(args); return { ok: true }; },
     transferBetween: async (...args) => { transfers.push(args); return { ok: true }; },
     createDirectory: async (...args) => { folders.push(args); return { ok: true }; },
     propertiesOpen: async () => ({ token: 'properties-token', type: 'directory', size: 12884901888, mode: 0o40755, uid: 0, gid: 0, mtime: 100 }),
@@ -61,6 +62,7 @@ test('SFTP context menus select a right-clicked file and perform actual actions'
   const menu = elements.sftpContextMenu; assert.equal(menu.classList.contains('hidden'), false);
   assert.equal(menu.style.left, '546px'); assert.equal(menu.style.top, '396px');
   menu.children.find((button) => label(button) === 'Скопировать путь объекта').click(); await tick(); assert.equal(copied, '/local/photo.txt');
+  row.emit('contextmenu', { clientX: 10, clientY: 10 }); const names = menu.children.find((node) => node.className === 'sftp-submenu-wrap' && label(node.children[0]) === 'Имена файлов'); names.children[0].click(); names.children[1].children.find((item) => label(item) === 'Имя без расширения').click(); await tick(); assert.equal(copied, 'photo');
   row.emit('contextmenu', { clientX: 10, clientY: 10 }); menu.children.find((button) => label(button) === 'Изменить файл').click(); await tick();
   assert.equal(elements.sftpEditorDialog.open, true); assert.equal(elements.sftpEditorText.value, 'original');
   elements.sftpEditorText.value = 'edited'; elements.sftpEditorText.emit('input'); elements.sftpEditorClose.click(); assert.equal(elements.sftpEditorDialog.open, true);
@@ -69,21 +71,31 @@ test('SFTP context menus select a right-clicked file and perform actual actions'
   row.emit('contextmenu', { clientX: 10, clientY: 10 });
   menu.children.find((button) => label(button) === 'Отправить на сервер').click(); await tick();
   assert.deepEqual(transfers[0], ['session', '/local', '/home', 'photo.txt', 'upload']);
+  row.emit('contextmenu', { clientX: 10, clientY: 10 });
+  for (const labelText of ['Открыть', 'Дублировать…', 'Перенести…', 'Удалить', 'Переименовать…', 'Скопировать в буфер обмена', 'Свойства']) assert.ok(menu.children.some((button) => label(button) === labelText), labelText);
+  menu.children.find((button) => label(button) === 'Переименовать…').click(); assert.equal(elements.sftpOperationDialog.open, true);
+  elements.sftpOperationValue.value = 'new-name.txt'; elements.sftpOperationForm.emit('submit'); await tick(); assert.deepEqual(operations[0], ['session', 'local', '/local', 'photo.txt', 'rename', 'new-name.txt']);
+  row.emit('contextmenu', { clientX: 10, clientY: 10 }); menu.children.find((button) => label(button) === 'Удалить').click(); await tick(); assert.equal(operations[1][4], 'delete');
+  row.emit('contextmenu', { clientX: 10, clientY: 10 }); menu.children.find((button) => label(button) === 'Скопировать в буфер обмена').click(); await tick(); assert.equal(operations[2][4], 'clipboard');
   elements.sftpRemoteList.emit('contextmenu', { clientX: 20, clientY: 20 });
-  let group = menu.children.find((node) => node.className === 'sftp-submenu-wrap');
+  let group = menu.children.find((node) => node.className === 'sftp-submenu-wrap' && label(node.children[0]) === 'Новый');
   group.children[0].click(); group.children[1].children.find((button) => label(button) === 'Каталог…').click(); assert.equal(elements.sftpNewFolderDialog.open, true);
   elements.sftpNewFolderName.value = 'folder'; elements.sftpNewFolderForm.emit('submit'); await tick();
   assert.deepEqual(folders[0], ['session', 'remote', '/home', 'folder']); assert.equal(elements.sftpNewFolderDialog.open, false);
   elements.sftpRemoteList.emit('contextmenu', { clientX: 20, clientY: 20 });
-  group = menu.children.find((node) => node.className === 'sftp-submenu-wrap'); group.children[0].click(); group.children[1].children.find((button) => label(button) === 'Файл…').click();
+  group = menu.children.find((node) => node.className === 'sftp-submenu-wrap' && label(node.children[0]) === 'Новый'); group.children[0].click(); group.children[1].children.find((button) => label(button) === 'Файл…').click();
   elements.sftpNewFolderName.value = 'empty.txt'; elements.sftpNewFolderForm.emit('submit'); await tick(); assert.deepEqual(files[0], ['session', 'remote', '/home', 'empty.txt']);
   elements.sftpRemoteList.emit('contextmenu', { clientX: 20, clientY: 20 });
-  group = menu.children.find((node) => node.className === 'sftp-submenu-wrap'); group.children[0].click(); group.children[1].children.find((button) => label(button) === 'Ярлык…').click();
+  group = menu.children.find((node) => node.className === 'sftp-submenu-wrap' && label(node.children[0]) === 'Новый'); group.children[0].click(); group.children[1].children.find((button) => label(button) === 'Ярлык…').click();
   elements.sftpNewFolderName.value = 'link'; elements.sftpNewLinkTarget.value = '../target'; elements.sftpNewFolderForm.emit('submit'); await tick(); assert.deepEqual(links[0], ['session', 'remote', '/home', 'link', '../target']);
   elements.sftpRemoteList.emit('contextmenu', { clientX: 20, clientY: 20 });
   menu.children.find((button) => label(button) === 'Вставить файлы из буфера').click(); await tick();
   assert.deepEqual(pastes[0], ['session', '/home']);
   const remoteRow = elements.sftpEntries.children[0]; remoteRow.emit('contextmenu', { clientX: 20, clientY: 20 });
+  assert.equal(menu.children.find((button) => label(button) === 'Дублировать…').disabled, false);
+  menu.children.find((button) => label(button) === 'Дублировать…').click(); elements.sftpOperationValue.value = 'docs-copy'; elements.sftpOperationForm.emit('submit'); await tick(); assert.deepEqual(operations[3], ['session', 'remote', '/home', 'docs', 'duplicate', 'docs-copy']);
+  remoteRow.emit('contextmenu', { clientX: 20, clientY: 20 }); assert.equal(menu.children.find((button) => label(button) === 'Скопировать в буфер обмена').disabled, false); menu.children.find((button) => label(button) === 'Скопировать в буфер обмена').click(); await tick(); assert.equal(operations[4][4], 'clipboard');
+  remoteRow.emit('contextmenu', { clientX: 20, clientY: 20 });
   menu.children.find((button) => label(button) === 'Свойства').click(); await tick();
   assert.equal(elements.sftpPropertiesDialog.open, true); assert.equal(elements.sftpPropOctal.value, '0755');
   elements.sftpPerm2000.checked = true; elements.sftpPerm2000.emit('change'); assert.equal(elements.sftpPropOctal.value, '2755');

@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('rdpManager', {
     propertiesOpen: (id, side, directory, name) => ipcRenderer.invoke('ssh-properties-open', id, side, directory, name),
     propertiesSave: (id, token, changes) => ipcRenderer.invoke('ssh-properties-save', id, token, changes),
     propertiesReset: (id) => ipcRenderer.invoke('ssh-properties-reset', id),
+    operate: (id, side, directory, name, action, value) => ipcRenderer.invoke('ssh-operate', id, side, directory, name, action, value),
     editorOpen: (id, side, directory, name) => ipcRenderer.invoke('ssh-editor-open', id, side, directory, name),
     editorSave: (id, token, text) => ipcRenderer.invoke('ssh-editor-save', id, token, text),
     editorReset: (id) => ipcRenderer.invoke('ssh-editor-reset', id),
