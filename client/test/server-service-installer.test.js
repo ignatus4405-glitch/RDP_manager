@@ -13,7 +13,7 @@ test('installer checks and stops an existing service before replacing its execut
   assert.ok(prepare >= 0 && prepare < overwrite && registration > overwrite);
 });
 
-for (const file of ['prepare-server-service.ps1', 'register-server-service.ps1']) {
+for (const file of ['prepare-server-service.ps1', 'register-server-service.ps1', 'remove-server-service.ps1']) {
   test(`${file} rejects another service with the same name`, { skip: process.platform !== 'win32' }, () => {
     const target = path.join(__dirname, '../build', file).replace(/'/g, "''");
     const mock = `function Get-CimInstance { [pscustomobject]@{ PathName = 'C:\\Other\\foreign-service.exe' } }; function Get-ItemProperty { $null }; $env:RDP_INSTALL_DIR = 'C:\\RDP-Manager-Test'; & '${target}'`;
@@ -35,4 +35,13 @@ test('prepare waits for a deletion-marked service without changing other service
   const mock = `function Get-ItemProperty { [pscustomobject]@{ DeleteFlag = 1 } }; function Start-Sleep {}; function Get-CimInstance { throw 'unexpected service query' }; $env:RDP_INSTALL_DIR = 'C:\\RDP-Manager-Test'; & '${target}'`;
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', mock], { encoding: 'utf8' });
   assert.notEqual(result.status, 0); assert.match(result.stderr, /marked for deletion/i); assert.doesNotMatch(result.stderr, /unexpected service query/i);
+});
+
+test('upgrades retain service registration; component removal remains explicit', () => {
+  const uninstall = script.slice(script.indexOf('!macro customUnInstall'));
+  const upgrade = uninstall.slice(uninstall.indexOf('${If} ${isUpdated}'), uninstall.indexOf('${ElseIfNot} ${isUpdated}'));
+  assert.match(upgrade, /prepare-server-service\.ps1/);
+  assert.doesNotMatch(upgrade, /RDPManagerServer\.exe" uninstall/);
+  assert.match(uninstall.slice(uninstall.indexOf('${ElseIfNot} ${isUpdated}')), /RDPManagerServer\.exe" uninstall/);
+  assert.match(script, /remove-server-service\.ps1/);
 });
