@@ -3,7 +3,7 @@
  * RDP Manager — главный процесс Electron.
  * Окно приложения + безопасный запуск внешних программ (mstsc / AnyDesk / RustDesk).
  */
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, ClipboardItem, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, ClipboardItem, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -12,6 +12,7 @@ const { fileURLToPath, pathToFileURL } = require('node:url');
 const { Blob } = require('node:buffer');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
+const { createLocalCredentials } = require('./local-credentials');
 const { createRdpFileWriter } = require('./rdp-file-writer');
 const { createClipboardFileSource } = require('./clipboard-file-source');
 const { createClipboardReceiver, clipboardFingerprint } = require('./rdp-clipboard-receiver');
@@ -21,6 +22,7 @@ const { createWindowsLayoutHook } = require('./windows-layout-hook');
 const { createSshSession } = require('./ssh-session');
 const { createWebAppView } = require('./web-app-view');
 const webAppView = createWebAppView(() => mainWindow);
+const localCredentials = createLocalCredentials({ safeStorage, directory: path.join(app.getPath('userData'), 'local-credentials') });
 
 // electron-updater (auto-update from GitHub Releases). В dev-режиме не используется.
 let autoUpdater = null;
@@ -478,6 +480,9 @@ ipcMain.handle('rdp-file-begin', (event, name) => {
 ipcMain.handle('rdp-file-write', (event, id, chunk) => { requireClientWindow(event); return fileWriter.write(id, chunk); });
 ipcMain.handle('rdp-file-finish', (event, id) => { requireClientWindow(event); return fileWriter.finish(id); });
 ipcMain.handle('rdp-file-cancel', (event, id) => { requireClientWindow(event); return fileWriter.cancel(id); });
+ipcMain.handle('local-credentials-get', (event, scope) => { requireClientWindow(event); return localCredentials.get(scope); });
+ipcMain.handle('local-credentials-put', (event, scope, value) => { requireClientWindow(event); return localCredentials.put(scope, value); });
+ipcMain.handle('local-credentials-remove', (event, scope) => { requireClientWindow(event); return localCredentials.remove(scope); });
 ipcMain.handle('update-state', () => updateController.getState());
 ipcMain.handle('update-check', () => updateController.check());
 ipcMain.handle('update-install', async () => {

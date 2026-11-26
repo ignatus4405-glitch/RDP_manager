@@ -1,5 +1,5 @@
 'use strict';
-// Experimental direct RustDesk viewer for the desktop client. No passwords are stored.
+// Experimental direct RustDesk viewer for the desktop client.
 (function () {
   const $r = (id) => document.getElementById(id);
   let attempt = 0;
@@ -10,7 +10,7 @@
   let viewer = null;
   let credential = null;
   let prompted = false;
-  let initialPassword = '';
+  let initialPassword = '', savedPasswordCandidate = '', credentialScope = null, inputRevision = 0;
   let clipboardSync = null;
   let fileClipboard = null;
 
@@ -21,7 +21,7 @@
   function dispose() {
     attempt++;
     credential = null;
-    initialPassword = '';
+    initialPassword = ''; savedPasswordCandidate = ''; inputRevision++;
     $r('rustdeskPassword').value = '';
     clipboardSync?.stop();
     clipboardSync = null;
@@ -70,6 +70,7 @@
   function showCredential(kind, wrong = false) {
     credential = kind;
     prompted = true;
+    if (kind === 'password' && wrong) savedPasswordCandidate = '';
     $r('rustdeskForm').classList.remove('hidden');
     $r('rustdeskViewer').classList.add('hidden');
     $r('rustdeskPassword').value = '';
@@ -95,7 +96,13 @@
     $r('rustdeskOverlay').classList.remove('hidden');
     status('Не подключено');
     $r('rustdeskPassword').focus();
+    credentialScope = window.personalCredentialScope?.(connection) || null;
+    $r('rustdeskRemember').disabled = !credentialScope; $r('rustdeskForget').disabled = !credentialScope; $r('rustdeskRemember').checked = Boolean(credentialScope);
+    const revision = inputRevision, scope = credentialScope;
+    if (scope) void window.rdpManager.localCredentials.get(scope).then((saved) => { if (scope === credentialScope && revision === inputRevision && !$r('rustdeskOverlay').classList.contains('hidden') && typeof saved?.password === 'string') $r('rustdeskPassword').value = saved.password; }).catch((error) => { if (scope === credentialScope && revision === inputRevision) $r('rustdeskError').textContent = `Локальный пароль недоступен: ${error.message}`; });
   };
+  $r('rustdeskPassword').addEventListener('input', () => { inputRevision++; });
+  $r('rustdeskForget').addEventListener('click', async () => { const scope = credentialScope; if (!scope) return; const revision = ++inputRevision; try { await window.rdpManager.localCredentials.remove(scope); if (scope === credentialScope && revision === inputRevision) { $r('rustdeskPassword').value = ''; $r('rustdeskRemember').checked = false; $r('rustdeskError').textContent = 'Локальный пароль удалён.'; } } catch (error) { $r('rustdeskError').textContent = error.message; } });
   window.closeEmbeddedRustDesk = close;
   $r('rustdeskClose').addEventListener('click', close);
   $r('rustdeskDisconnect').addEventListener('click', () => { dispose(); resetForm(); status('Отключено'); });
@@ -113,6 +120,7 @@
       input.value = '';
       if (!value) { $r('rustdeskError').textContent = 'Введите данные для подключения.'; return; }
       credential = null;
+      if (kind === 'password') savedPasswordCandidate = value;
       $r('rustdeskConnect').disabled = true;
       try {
         if (kind === 'twoFactor') active.submitTwoFactor(value);
@@ -138,8 +146,8 @@
     let config;
     try { config = window.RustDeskConfig.directRustDeskConfig({ server: serverAddress, publicKey }); }
     catch (error) { $r('rustdeskError').textContent = `Настройте сервер ID и публичный ключ в карточке подключения. ${error.message}`; return; }
-    initialPassword = input.value;
-    input.value = '';
+    initialPassword = input.value; savedPasswordCandidate = initialPassword;
+    inputRevision++; input.value = '';
     prompted = false;
     const generation = ++attempt;
     let current;
@@ -194,6 +202,11 @@
       current.on('connected', () => {
         if (session !== current) return;
         initialPassword = ''; credential = null;
+        const scope = credentialScope, password = savedPasswordCandidate; savedPasswordCandidate = '';
+        if (scope && (password || !$r('rustdeskRemember').checked)) {
+          const save = $r('rustdeskRemember').checked ? window.rdpManager.localCredentials.put(scope, { username: '', domain: '', password }) : window.rdpManager.localCredentials.remove(scope);
+          void save.catch((error) => { if (session === current) status(`Не удалось сохранить пароль: ${error.message}`, 'error'); });
+        }
         $r('rustdeskPassword').value = '';
         $r('rustdeskForm').classList.add('hidden');
         $r('rustdeskViewer').classList.remove('hidden');

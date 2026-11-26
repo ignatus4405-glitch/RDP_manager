@@ -1,0 +1,21 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { createLocalCredentials } = require('../local-credentials');
+test('encrypted local credentials are separated by user, server, target and connection, and can be removed', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rdpm-creds-')); t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const safeStorage = { isEncryptionAvailable: () => true, encryptString: (s) => Buffer.from(s).map((x) => x ^ 0x91), decryptString: (b) => Buffer.from(b).map((x) => x ^ 0x91).toString() };
+  const store = createLocalCredentials({ directory, safeStorage, platform: 'win32' });
+  const scope = { server: 'https://example', userId: 1, userName: 'alice', connectionId: 2, type: 'rdp', target: 'host:3389' };
+  const value = { username: 'user', domain: 'domain', password: 'secret' };
+  await store.put(scope, value); assert.deepEqual(await store.get(scope), value);
+  for (const variant of [{ userId: 2 }, { userName: 'bob' }, { connectionId: 3 }, { server: 'https://other' }, { target: 'other' }, { type: 'rustdesk' }]) assert.equal(await store.get({ ...scope, ...variant }), null);
+  assert.doesNotMatch((await fs.readFile(path.join(directory, (await fs.readdir(directory))[0]))).toString(), /secret|user|domain/);
+  await store.put(scope, { ...value, password: 'new' }); assert.equal((await store.get(scope)).password, 'new');
+  await store.remove(scope); assert.equal(await store.get(scope), null);
+  await assert.rejects(store.get({ ...scope, connectionId: '../../x' }), /область/);
+  const unavailable = createLocalCredentials({ directory, safeStorage, platform: 'linux' }); await assert.rejects(unavailable.put(scope, value), /Windows/);
+});
