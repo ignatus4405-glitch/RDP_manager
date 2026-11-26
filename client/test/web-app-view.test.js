@@ -15,7 +15,7 @@ function setup() {
     async executeJavaScriptInIsolatedWorld(id, scripts) { this.code.push({ id, scripts }); return true; }
   }
   class View { constructor(options) { this.options = options; this.webContents = new Contents(); views.push(this); } setBounds(bounds) { this.rect = bounds; } }
-  const electron = { WebContentsView: View, session: { fromPartition(name) { const ses = new EventEmitter(); ses.name = name; ses.webRequest = { onBeforeRequest(cb) { ses.filter = cb; } }; ses.setPermissionRequestHandler = (cb) => { ses.permission = cb; }; ses.setPermissionCheckHandler = (cb) => { ses.check = cb; }; ses.clearStorageData = async () => { ses.cleared = true; }; sessions.push(ses); return ses; } } };
+  const electron = { WebContentsView: View, session: { fromPartition(name) { const ses = new EventEmitter(); ses.name = name; ses.webRequest = { onBeforeRequest(cb) { ses.filter = cb; }, onErrorOccurred(cb) { ses.error = cb; }, onCompleted(cb) { ses.completed = cb; } }; ses.setPermissionRequestHandler = (cb) => { ses.permission = cb; }; ses.setPermissionCheckHandler = (cb) => { ses.check = cb; }; ses.clearStorageData = async () => { ses.cleared = true; }; sessions.push(ses); return ses; } } };
   const win = { isDestroyed: () => false, contentView: { addChildView() {}, removeChildView() {} }, getContentSize: () => [800, 600], webContents: { send(_name, data) { reports.push(data); } } };
   return { manager: createWebAppView(() => win, electron), views, sessions, reports };
 }
@@ -31,4 +31,20 @@ test('embedded view is sandboxed and isolated; navigation and permissions restri
 test('does not inject credentials after a cross-origin redirect', async () => {
   const { manager, views, reports } = setup(); manager.open(options); const wc = views[0].webContents; wc.url = 'https://other.example/login'; wc.emit('did-finish-load'); await new Promise(setImmediate);
   assert.equal(wc.code.length, 0); assert.match(reports.at(-1).message, /вручную/); manager.close();
+});
+
+test('reports resource and script errors without leaking URLs or console contents, retaining warnings through load', async () => {
+  const { manager, sessions, views, reports } = setup(); manager.open(options); const ses = sessions[0], wc = views[0].webContents;
+  ses.error({ resourceType: 'script', error: 'net::ERR_CERT_AUTHORITY_INVALID', url: 'https://site/secret?token=private' });
+  assert.match(reports.at(-1).message, /сертификата/);
+  wc.emit('did-finish-load'); await new Promise(setImmediate); assert.match(reports.at(-1).message, /сертификата/);
+  assert.doesNotMatch(JSON.stringify(reports), /private|secret\?token/);
+  wc.emit('did-start-navigation', {}, '', false, true);
+  ses.completed({ resourceType: 'script', statusCode: 404 }); assert.match(reports.at(-1).message, /HTTP 404/);
+  wc.emit('did-start-navigation', {}, '', false, true);
+  wc.emit('console-message', {}, { level: 'error', message: 'password=secret' }); assert.match(reports.at(-1).message, /скрипта/);
+  assert.doesNotMatch(JSON.stringify(reports), /password=secret/);
+  wc.emit('did-start-navigation', {}, '', false, true);
+  ses.completed({ resourceType: 'mainFrame', statusCode: 503 }); assert.match(reports.at(-1).message, /HTTP 503/);
+  manager.close(); const length = reports.length; ses.error({ resourceType: 'script', error: 'net::ERR_FAILED' }); assert.equal(reports.length, length);
 });
