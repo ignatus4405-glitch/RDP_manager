@@ -210,6 +210,18 @@ FunctionEnd
   !insertmacro migrateLegacyServer
   ; electron-builder уже распаковал приложение. Добавляем серверный комплект только по выбору пользователя.
   ${If} $RdpInstallServer == "1"
+    ; The previous uninstaller may have left the service registered. Stop it
+    ; before replacing the wrapper/server and refuse an unrelated service name.
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\prepare-server-service.ps1 "${BUILD_RESOURCES_DIR}\prepare-server-service.ps1"
+    File /oname=$PLUGINSDIR\register-server-service.ps1 "${BUILD_RESOURCES_DIR}\register-server-service.ps1"
+    System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_DIR", w "$INSTDIR") i .r0'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\prepare-server-service.ps1"'
+    Pop $0
+    ${If} $0 != 0
+      MessageBox MB_ICONSTOP "Не удалось безопасно остановить существующую службу RDP Manager Server (код $0). Проверьте службу и повторите установку."
+      Abort
+    ${EndIf}
     SetOutPath "$INSTDIR\server"
     File "${RDP_SERVER_PAYLOAD}\rdp-manager-server.exe"
     File "${RDP_SERVER_PAYLOAD}\RDPManagerServer.exe"
@@ -220,7 +232,7 @@ FunctionEnd
     SetOutPath "$INSTDIR\server\web"
     File /r "${RDP_SERVER_PAYLOAD}\web\*.*"
 
-    ; Старая служба уже остановлена деинсталлятором предыдущей версии.
+    ; Данные старой установки сохраняются независимо от регистрации службы.
     ; Копируем, но не удаляем исходные данные, чтобы восстановление было возможным.
     ${If} $RdpPreviousDataDirectory != $RdpDataDirectory
     ${AndIf} ${FileExists} "$RdpPreviousDataDirectory\rdp-manager.db"
@@ -261,9 +273,10 @@ FunctionEnd
     ExecWait '"$SYSDIR\icacls.exe" "${RDP_SERVER_DATA}\logs" /grant "*S-1-5-32-545:(OI)(CI)RX" /T /C' $0
 
     ; WinSW регистрирует настоящий Windows Service. Приложение пишет server.log, WinSW ротирует stdout/stderr.
-    ExecWait '"$INSTDIR\server\RDPManagerServer.exe" install' $0
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\register-server-service.ps1"'
+    Pop $0
     ${If} $0 != 0
-      MessageBox MB_ICONSTOP "Не удалось зарегистрировать службу RDP Manager Server (код $0). Установка будет остановлена. Запустите установщик от имени администратора."
+      MessageBox MB_ICONSTOP "Не удалось зарегистрировать службу RDP Manager Server (код $0). Закройте консоль служб и повторите установку; проверьте права администратора."
       Abort
     ${EndIf}
     ExecWait 'netsh advfirewall firewall delete rule name="${RDP_FIREWALL_RULE}"' $0

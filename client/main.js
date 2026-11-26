@@ -387,6 +387,8 @@ function initAutoUpdates() {
     updater: autoUpdater,
     supported: app.isPackaged && (process.platform === 'win32' || (process.platform === 'linux' && Boolean(process.env.APPIMAGE))),
     currentVersion: app.getVersion(),
+    openInstaller: process.platform === 'win32' ? (file) => shell.openPath(file) : null,
+    quit: () => { allowServerManagerQuit = true; setImmediate(() => app.quit()); },
     onChange: (state) => {
       for (const window of [mainWindow, serverManagerWindow]) {
         if (window && !window.isDestroyed()) window.webContents.send('update-state', state);
@@ -483,12 +485,13 @@ ipcMain.handle('update-install', async () => {
   const { response } = await dialog.showMessageBox(serverManagerWindow || mainWindow, {
     type: 'question', title: 'Установка обновления',
     message: 'Установить обновление сейчас?',
-    detail: 'Приложение закроется. При обновлении сервера служба будет временно остановлена. Сохраните работу и закройте другие окна RDP Manager.',
+    detail: 'Подтвердите запрос Windows на запуск установщика. После запуска приложение закроется; завершите установку в появившемся окне. При обновлении сервера служба будет временно остановлена. Сохраните работу и закройте другие окна RDP Manager.',
     buttons: ['Установить', 'Отмена'], defaultId: 1, cancelId: 1, noLink: true,
   });
   if (response !== 0) return { ok: false, cancelled: true };
-  allowServerManagerQuit = true;
-  return { ok: updateController.install() };
+  const started = await updateController.install();
+  if (started && process.platform !== 'win32') allowServerManagerQuit = true;
+  return { ok: started, message: started ? undefined : 'Установка уже запускается или обновление недоступно.' };
 });
 ipcMain.handle('open-external', (event, url) => {
   if (/^https?:\/\//i.test(String(url || ''))) return shell.openExternal(url);
