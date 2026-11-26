@@ -24,6 +24,7 @@ Var RdpRadioServer
 Var RdpRadioBoth
 Var RdpComponentsDialog
 Var RdpPreviousDataDirectory
+Var RdpHadServer
 Var RdpDataDirectoryInput
 Var RdpBrowseDataButton
 !endif
@@ -39,6 +40,11 @@ Var RdpBrowseDataButton
   StrCpy $RdpPreviousDataDirectory "$RdpDataDirectory"
   ReadRegStr $0 HKLM "${RDP_COMPONENTS_KEY}" "ClientInstalled"
   ReadRegStr $1 HKLM "${RDP_COMPONENTS_KEY}" "ServerInstalled"
+  StrCpy $RdpHadServer $1
+  ${If} $RdpHadServer != "1"
+  ${AndIf} ${FileExists} "$INSTDIR\server\RDPManagerServer.exe"
+    StrCpy $RdpHadServer "1"
+  ${EndIf}
   ${If} $0 != ""
   ${OrIf} $1 != ""
     StrCpy $RdpInstallClient $0
@@ -227,6 +233,7 @@ FunctionEnd
     File "${RDP_SERVER_PAYLOAD}\rdp-manager-server.exe"
     File "${RDP_SERVER_PAYLOAD}\RDPManagerServer.exe"
     File "${RDP_SERVER_PAYLOAD}\RDPManagerServer.xml"
+    File "${BUILD_RESOURCES_DIR}\prepare-server-service.ps1"
     File "${BUILD_RESOURCES_DIR}\configure-server-data.ps1"
     File "${RDP_SERVER_PAYLOAD}\WinSW-LICENSE.txt"
     File "${RDP_SERVER_PAYLOAD}\server-version.txt"
@@ -288,7 +295,20 @@ FunctionEnd
       MessageBox MB_ICONEXCLAMATION "Служба установлена, но не запустилась (код $0). Откройте управление сервером и проверьте журнал."
     ${EndIf}
   ${Else}
-    ; Если серверный компонент сняли при обновлении, старый uninstaller уже удалил службу.
+    ; Новые версии сохраняют регистрацию службы при обновлении. Если пользователь
+    ; явно снял серверный компонент, удаляем только проверенную службу.
+    ${If} $RdpHadServer == "1"
+      InitPluginsDir
+      File /oname=$PLUGINSDIR\remove-server-service.ps1 "${BUILD_RESOURCES_DIR}\remove-server-service.ps1"
+      System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_DIR", w "$INSTDIR") i .r0'
+      nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-server-service.ps1"'
+      Pop $0
+      Pop $1
+      ${If} $0 != 0
+        MessageBox MB_ICONSTOP "Не удалось удалить службу сервера (код $0).$\r$\n$\r$\nПодробности: $1"
+        Abort
+      ${EndIf}
+    ${EndIf}
     ExecWait 'netsh advfirewall firewall delete rule name="${RDP_FIREWALL_RULE}"' $0
   ${EndIf}
 
@@ -324,11 +344,24 @@ FunctionEnd
 !macroend
 
 !macro customUnInstall
-  ; При обновлении NSIS вызывает этот макрос в тихом режиме: служба переустанавливается ниже,
-  ; ProgramData не трогаем. При обычном удалении оставляем базу и логи по умолчанию.
-  ${If} ${FileExists} "$INSTDIR\server\RDPManagerServer.exe"
-    ExecWait '"$INSTDIR\server\RDPManagerServer.exe" stop' $0
-    ExecWait '"$INSTDIR\server\RDPManagerServer.exe" uninstall' $0
+  ; При обновлении останавливаем службу, но не удаляем её регистрацию: открытая
+  ; консоль служб иначе удерживает её в состоянии «помечена для удаления».
+  ; Новая версия установщика при снятии серверного компонента удалит службу отдельно.
+  ${If} ${isUpdated}
+  ${AndIf} ${FileExists} "$INSTDIR\server\RDPManagerServer.exe"
+    System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_DIR", w "$INSTDIR") i .r0'
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\server\prepare-server-service.ps1"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      MessageBox MB_ICONSTOP "Не удалось остановить службу перед обновлением (код $0).$\r$\n$\r$\nПодробности: $1"
+      Abort
+    ${EndIf}
+  ${ElseIfNot} ${isUpdated}
+    ${If} ${FileExists} "$INSTDIR\server\RDPManagerServer.exe"
+      ExecWait '"$INSTDIR\server\RDPManagerServer.exe" stop' $0
+      ExecWait '"$INSTDIR\server\RDPManagerServer.exe" uninstall' $0
+    ${EndIf}
   ${EndIf}
   ExecWait 'netsh advfirewall firewall delete rule name="${RDP_FIREWALL_RULE}"' $0
 
