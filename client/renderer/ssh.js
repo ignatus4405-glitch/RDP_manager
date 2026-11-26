@@ -3,10 +3,10 @@
   const $ = (id) => document.getElementById(id);
   let conn = null, id = null, generation = 0, terminal = null, fit = null, directory = '.', localDirectory = null, localParent = null, pending = false, earlyEvents = [], passwordTouched = false;
   let localSelection = null, remoteSelection = null, transferring = false, localRequest = 0, remoteRequest = 0;
-  let folderTarget = null, activeSide = 'remote', editState = null, editGeneration = 0, propertiesState = null, propertiesGeneration = 0;
+  let folderTarget = null, activeSide = 'remote', editState = null, editGeneration = 0, propertiesState = null, propertiesGeneration = 0, operationState = null;
   function status(text, error = false) { $('sshStatus').textContent = text; $('sshStatus').dataset.kind = error ? 'error' : 'idle'; }
   function close() {
-    generation++; hideContextMenu(); forceCloseEditor(); forceCloseProperties(); if ($('sftpNewFolderDialog').open) $('sftpNewFolderDialog').close(); folderTarget = null;
+    generation++; hideContextMenu(); forceCloseEditor(); forceCloseProperties(); if ($('sftpOperationDialog').open) $('sftpOperationDialog').close(); operationState = null; if ($('sftpNewFolderDialog').open) $('sftpNewFolderDialog').close(); folderTarget = null;
     const old = id; id = null; conn = null; pending = false; earlyEvents = []; localRequest++; remoteRequest++; transferring = false; localDirectory = null; localParent = null; directory = '.'; localSelection = remoteSelection = null; updateActions();
     if (old) void window.rdpManager?.ssh?.close(old).catch(() => {});
     if (terminal) terminal.dispose(); terminal = null; fit = null;
@@ -119,10 +119,34 @@
       button.addEventListener('click', () => { hideContextMenu(); handler(); }); menu.appendChild(button);
     };
     const separator = () => menu.appendChild(document.createElement('hr'));
-    if (file && (file.directory || file.link)) add('↗', 'Открыть', 'Enter', () => enter?.(), transferring);
+    if (file) add('↗', 'Открыть', 'Enter', () => enter?.(), transferring);
     if (file?.file) add('✎', 'Изменить файл', 'F4', () => void openEditor(side, file), transferring);
-    if (file?.file) add(side === 'local' ? '→' : '←', side === 'local' ? 'Отправить на сервер' : 'Получить на компьютер', '', () => void transfer(side === 'local' ? 'upload' : 'download'), transferring || !localDirectory || !directory.startsWith('/'));
-    if (file) { add('ⓘ', 'Свойства', 'F9', () => void openProperties(side, file), transferring); separator(); }
+    if (file?.file) add(side === 'local' ? '→' : '←', side === 'local' ? 'Отправить на сервер' : 'Получить на компьютер', 'F5', () => void transfer(side === 'local' ? 'upload' : 'download'), transferring || !localDirectory || !directory.startsWith('/'));
+    if (file) {
+      add('⧉', 'Дублировать…', 'Shift+F5', () => openOperationDialog(side, file, 'duplicate'), transferring || !(file.file || (side === 'remote' && file.directory)));
+      add('⇥', 'Перенести…', 'Shift+F6', () => openOperationDialog(side, file, 'move'), transferring);
+      add('✕', 'Удалить', 'F8', () => void runOperation(side, file, 'delete'), transferring);
+      add('✎', 'Переименовать…', 'F2', () => openOperationDialog(side, file, 'rename'), transferring);
+      add('▣', 'Скопировать в буфер обмена', 'Ctrl+C', () => void runOperation(side, file, 'clipboard'), transferring || (side === 'remote' && !(file.file || file.directory)));
+      const names = document.createElement('div'); names.className = 'sftp-submenu-wrap';
+      const namesTrigger = document.createElement('button'); namesTrigger.type = 'button'; namesTrigger.setAttribute('role', 'menuitem'); namesTrigger.setAttribute('aria-haspopup', 'menu'); namesTrigger.setAttribute('aria-expanded', 'false');
+      for (const [cls, value] of [['sftp-menu-icon', '▤'], ['sftp-menu-label', 'Имена файлов'], ['sftp-menu-key', '▶']]) { const span = document.createElement('span'); span.className = cls; span.textContent = value; namesTrigger.appendChild(span); }
+      const namesMenu = document.createElement('div'); namesMenu.className = 'sftp-submenu hidden'; namesMenu.setAttribute('role', 'menu');
+      const showNames = () => { namesMenu.classList.remove('hidden'); namesTrigger.setAttribute('aria-expanded', 'true'); };
+      const hideNames = () => { namesMenu.classList.add('hidden'); namesTrigger.setAttribute('aria-expanded', 'false'); };
+      const dot = file.name.lastIndexOf('.');
+      for (const [title, value] of [['Скопировать имя', file.name], ['Скопировать путь', selectedPath(side, file)], ['Имя без расширения', dot > 0 ? file.name.slice(0, dot) : file.name]]) {
+        const item = document.createElement('button'); item.type = 'button'; item.setAttribute('role', 'menuitem');
+        for (const [cls, text] of [['sftp-menu-icon', '▤'], ['sftp-menu-label', title], ['sftp-menu-key', '']]) { const span = document.createElement('span'); span.className = cls; span.textContent = text; item.appendChild(span); }
+        item.addEventListener('click', () => { hideContextMenu(); void window.rdpManager.writeClipboard(value).then(() => message('Скопировано в буфер обмена')).catch((error) => message(error.message, true)); }); namesMenu.appendChild(item);
+      }
+      namesTrigger.addEventListener('click', () => { if (namesMenu.classList.contains('hidden')) showNames(); else hideNames(); });
+      namesTrigger.addEventListener('keydown', (event) => { if (event.key === 'ArrowRight') { event.preventDefault(); showNames(); namesMenu.querySelector('button:not(:disabled)')?.focus(); } });
+      namesMenu.addEventListener('keydown', (event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); hideNames(); namesTrigger.focus(); } });
+      names.addEventListener('mouseenter', showNames); names.addEventListener('mouseleave', hideNames); names.append(namesTrigger, namesMenu); menu.appendChild(names);
+
+      add('ⓘ', 'Свойства', 'F9', () => void openProperties(side, file), transferring); separator();
+    }
     add('↑', 'На уровень вверх', '', () => side === 'local' ? void showLocal(localParent) : $('sftpUp').click(), transferring || (side === 'local' && !localParent));
     add('↻', 'Обновить', 'Ctrl+R', () => side === 'local' ? void showLocal(localDirectory) : void showDirectory(directory), transferring);
     add('▤', file ? 'Скопировать путь объекта' : 'Скопировать путь', '', () => {
@@ -152,7 +176,7 @@
     const rect = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
     menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
-    group.classList.toggle('opens-left', parseFloat(menu.style.left) + rect.width + 240 > window.innerWidth);
+    for (const wrapper of menu.children) if (wrapper.classList.contains('sftp-submenu-wrap')) wrapper.classList.toggle('opens-left', parseFloat(menu.style.left) + rect.width + 240 > window.innerWidth);
     menu.querySelector('button:not(:disabled)')?.focus();
   }
   for (const [element, side] of [['sftpLocalList', 'local'], ['sftpRemoteList', 'remote']]) {
@@ -164,7 +188,14 @@
   document.addEventListener('pointerdown', (event) => { if (!$('sftpContextMenu').contains(event.target)) hideContextMenu(); });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { hideContextMenu(); return; }
-    if ($('sftpPanel').classList.contains('hidden') || $('sftpNewFolderDialog').open || $('sftpPropertiesDialog').open || event.target.matches('input, textarea, [contenteditable="true"]')) return;
+    if ($('sftpPanel').classList.contains('hidden') || $('sftpNewFolderDialog').open || $('sftpPropertiesDialog').open || $('sftpEditorDialog').open || $('sftpOperationDialog').open || event.target.matches('input, textarea, [contenteditable="true"]')) return;
+    const selected = activeSide === 'local' ? localSelection : remoteSelection;
+    if (selected && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F2') { event.preventDefault(); hideContextMenu(); openOperationDialog(activeSide, selected, 'rename'); return; }
+    if (selected && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F8') { event.preventDefault(); hideContextMenu(); void runOperation(activeSide, selected, 'delete'); return; }
+    if (selected && !event.ctrlKey && !event.altKey && !event.metaKey && event.shiftKey && event.key === 'F5') { event.preventDefault(); hideContextMenu(); if (selected.file || (activeSide === 'remote' && selected.directory)) openOperationDialog(activeSide, selected, 'duplicate'); return; }
+    if (selected && !event.ctrlKey && !event.altKey && !event.metaKey && event.shiftKey && event.key === 'F6') { event.preventDefault(); hideContextMenu(); openOperationDialog(activeSide, selected, 'move'); return; }
+    if (selected?.file && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F5') { event.preventDefault(); hideContextMenu(); void transfer(activeSide === 'local' ? 'upload' : 'download'); return; }
+    if (selected && event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c' && (activeSide === 'local' || selected.file || selected.directory)) { event.preventDefault(); hideContextMenu(); void runOperation(activeSide, selected, 'clipboard'); return; }
     if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F9') { const file = activeSide === 'local' ? localSelection : remoteSelection; if (file) { event.preventDefault(); hideContextMenu(); void openProperties(activeSide, file); } return; }
     if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F4') { const file = activeSide === 'local' ? localSelection : remoteSelection; if (file?.file) { event.preventDefault(); hideContextMenu(); void openEditor(activeSide, file); } return; }
     if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'F7') { event.preventDefault(); hideContextMenu(); openCreateDialog(activeSide, 'directory'); return; }
@@ -172,6 +203,40 @@
     if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'r') { event.preventDefault(); hideContextMenu(); if (activeSide === 'local') void showLocal(localDirectory); else void showDirectory(directory); }
     if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v' && activeSide === 'remote') { event.preventDefault(); hideContextMenu(); void pasteClipboardFiles(); }
   });
+  function openOperationDialog(side, file, action) {
+    if (!id || transferring || !currentPath(side) || !file || !['rename', 'move', 'duplicate'].includes(action) || (action === 'duplicate' && !(file.file || (side === 'remote' && file.directory)))) return;
+    operationState = { id, side, directory: currentPath(side), file, action };
+    $('sftpOperationTitle').textContent = action === 'rename' ? 'Переименовать' : action === 'move' ? 'Перенести' : 'Дублировать';
+    $('sftpOperationLocation').textContent = selectedPath(side, file);
+    $('sftpOperationLabel').textContent = action === 'move' ? 'Абсолютный путь каталога назначения' : 'Новое имя';
+    $('sftpOperationValue').value = action === 'move' ? currentPath(side) : action === 'duplicate' ? `${file.name}.copy` : file.name;
+    $('sftpOperationHint').textContent = action === 'move' ? 'Перемещение выполняется в пределах той же панели. При совпадении имени операция отклоняется; параллельные изменения могут создать конфликт.' : 'При совпадении имени операция отклоняется; параллельные изменения могут создать конфликт.';
+    $('sftpOperationError').textContent = ''; $('sftpOperationSubmit').disabled = false; $('sftpOperationDialog').showModal(); $('sftpOperationValue').focus();
+  }
+  $('sftpOperationCancel').addEventListener('click', () => { if (!transferring) $('sftpOperationDialog').close(); });
+  $('sftpOperationDialog').addEventListener('cancel', (event) => { if (transferring) event.preventDefault(); });
+  $('sftpOperationDialog').addEventListener('close', () => { operationState = null; });
+  $('sftpOperationForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); const op = operationState; if (!op || transferring || op.id !== id) return;
+    $('sftpOperationSubmit').disabled = true; $('sftpOperationError').textContent = '';
+    await runOperation(op.side, op.file, op.action, $('sftpOperationValue').value, op);
+  });
+  async function runOperation(side, file, action, value, dialogState = null) {
+    if (!id || transferring || !file || !currentPath(side)) return;
+    const active = id, dir = currentPath(side); transferring = true; updateActions();
+    if (action === 'clipboard' && side === 'remote') { $('sftpProgress').classList.remove('hidden'); $('sftpProgress').value = 0; message('Скачивание временной копии для буфера (прогресс текущего файла)…'); }
+    else message('Выполнение операции…');
+    try {
+      const result = await window.rdpManager.ssh.operate(active, side, dir, file.name, action, value);
+      if (id !== active) return;
+      if (dialogState && operationState === dialogState) $('sftpOperationDialog').close();
+      transferring = false; updateActions();
+      message(result.cancelled ? 'Операция отменена' : action === 'clipboard' ? (result.staged ? 'Файл скопирован в буфер как временная копия до выхода из приложения' : 'Файл скопирован в системный буфер') : 'Операция выполнена');
+      if (result.ok && action !== 'clipboard' && currentPath(side) === dir) await (side === 'local' ? showLocal(dir) : showDirectory(dir));
+    } catch (error) {
+      if (id === active) { if (dialogState && operationState === dialogState) $('sftpOperationError').textContent = error.message; message(`Ошибка: ${error.message}`, true); }
+    } finally { if (id === active) { transferring = false; updateActions(); $('sftpProgress').classList.add('hidden'); if (dialogState && operationState === dialogState) $('sftpOperationSubmit').disabled = false; } }
+  }
   function openCreateDialog(side, kind) {
     if (!id || transferring || !currentPath(side) || !['file', 'directory', 'link'].includes(kind) || (kind === 'link' && side !== 'remote')) return;
     folderTarget = { side, kind, directory: currentPath(side), id };
@@ -328,7 +393,7 @@
     } else if (event.type === 'data') terminal?.write(new Uint8Array(event.bytes));
     else if (event.type === 'progress') { const text = `Передача: ${formatSize(event.done)} / ${formatSize(event.total)}`; message(text); $('sftpProgress').value = event.total > 0 ? Math.min(100, event.done / event.total * 100) : 0; }
     else if (event.type === 'error' || event.type === 'close') {
-      hideContextMenu(); if (propertiesState) { propertiesState.token = null; propertiesState.saving = false; $('sftpPropertiesSave').disabled = true; $('sftpPropertiesError').textContent = 'Соединение закрыто.'; } if (editState) { editState.token = null; editState.saving = false; $('sftpEditorText').disabled = !editState.loaded; $('sftpEditorSave').disabled = true; $('sftpEditorError').textContent = 'Соединение закрыто. Скопируйте несохранённый текст перед закрытием.'; } if ($('sftpNewFolderDialog').open) $('sftpNewFolderDialog').close(); folderTarget = null; id = null; transferring = false; updateActions(); if (terminal) terminal.dispose(); terminal = null; fit = null;
+      hideContextMenu(); if ($('sftpOperationDialog').open) $('sftpOperationDialog').close(); operationState = null; if (propertiesState) { propertiesState.token = null; propertiesState.saving = false; $('sftpPropertiesSave').disabled = true; $('sftpPropertiesError').textContent = 'Соединение закрыто.'; } if (editState) { editState.token = null; editState.saving = false; $('sftpEditorText').disabled = !editState.loaded; $('sftpEditorSave').disabled = true; $('sftpEditorError').textContent = 'Соединение закрыто. Скопируйте несохранённый текст перед закрытием.'; } if ($('sftpNewFolderDialog').open) $('sftpNewFolderDialog').close(); folderTarget = null; id = null; transferring = false; updateActions(); if (terminal) terminal.dispose(); terminal = null; fit = null;
       $('sshTerminal').classList.add('hidden'); $('sftpPanel').classList.add('hidden'); $('sshForm').classList.remove('hidden'); $('sshConnect').disabled = false;
       const message = event.type === 'error' ? event.message : 'Соединение закрыто'; $('sshError').textContent = message; status(message, event.type === 'error');
     }

@@ -6,13 +6,15 @@ const os = require('node:os');
 const { Client } = require('ssh2');
 const { createSftpEditor } = require('./sftp-editor');
 const { createSftpProperties } = require('./sftp-properties');
+const { createSftpOperations } = require('./sftp-operations');
 
 // SSH runs in the Electron main process, never in the remote site's context.
 // The user confirms the server key before any password is sent.
-function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, readClipboardFiles = async () => [], localStart = os.homedir(), makeClient = () => new Client() }) {
+function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, confirmDelete = async () => false, stageFile, publishFile, readClipboardFiles = async () => [], localStart = os.homedir(), makeClient = () => new Client() }) {
   let current = null;
   const editor = createSftpEditor({ getState: (id) => get(id, 'sftp'), isCurrent: (state) => state === current });
   const properties = createSftpProperties({ getState: (id) => get(id, 'sftp'), isCurrent: (state) => state === current });
+  const operations = createSftpOperations({ getState: (id) => get(id, 'sftp'), isCurrent: (state) => state === current, confirmDelete, stageFile, publishFile, progress: (state, event) => send(state, 'progress', event) });
   function send(state, type, extra = {}) { if (state === current) emit({ id: state.id, type, ...extra }); }
   function close(id) {
     if (!current || (id && current.id !== id)) return;
@@ -236,6 +238,6 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
       return { ok: true };
     } finally { state.busy = false; if (tmp) await fs.rm(tmp, { force: true }).catch(() => {}); }
   }
-  return { open, close, write, resize, list, localList, transfer, transferBetween, createDirectory, createFile, createLink, pasteFiles, propertiesOpen: properties.open, propertiesSave: properties.save, propertiesReset: (id) => { get(id, 'sftp'); properties.reset(); }, editorOpen: editor.open, editorSave: editor.save, editorReset: (id) => { get(id, 'sftp'); editor.reset(); } };
+  return { open, close, write, resize, list, localList, transfer, transferBetween, operate: operations.perform, createDirectory, createFile, createLink, pasteFiles, propertiesOpen: properties.open, propertiesSave: properties.save, propertiesReset: (id) => { get(id, 'sftp'); properties.reset(); }, editorOpen: editor.open, editorSave: editor.save, editorReset: (id) => { get(id, 'sftp'); editor.reset(); } };
 }
 module.exports = { createSshSession };
