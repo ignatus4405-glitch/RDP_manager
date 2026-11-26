@@ -216,10 +216,11 @@ FunctionEnd
     File /oname=$PLUGINSDIR\prepare-server-service.ps1 "${BUILD_RESOURCES_DIR}\prepare-server-service.ps1"
     File /oname=$PLUGINSDIR\register-server-service.ps1 "${BUILD_RESOURCES_DIR}\register-server-service.ps1"
     System::Call 'kernel32::SetEnvironmentVariableW(w "RDP_INSTALL_DIR", w "$INSTDIR") i .r0'
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\prepare-server-service.ps1"'
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\prepare-server-service.ps1"'
     Pop $0
+    Pop $1
     ${If} $0 != 0
-      MessageBox MB_ICONSTOP "Не удалось безопасно остановить существующую службу RDP Manager Server (код $0). Проверьте службу и повторите установку."
+      MessageBox MB_ICONSTOP "Не удалось безопасно остановить службу RDP Manager Server (код $0). Закройте консоль служб и повторите установку.$\r$\n$\r$\nПодробности: $1"
       Abort
     ${EndIf}
     SetOutPath "$INSTDIR\server"
@@ -273,10 +274,11 @@ FunctionEnd
     ExecWait '"$SYSDIR\icacls.exe" "${RDP_SERVER_DATA}\logs" /grant "*S-1-5-32-545:(OI)(CI)RX" /T /C' $0
 
     ; WinSW регистрирует настоящий Windows Service. Приложение пишет server.log, WinSW ротирует stdout/stderr.
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\register-server-service.ps1"'
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\register-server-service.ps1"'
     Pop $0
+    Pop $1
     ${If} $0 != 0
-      MessageBox MB_ICONSTOP "Не удалось зарегистрировать службу RDP Manager Server (код $0). Закройте консоль служб и повторите установку; проверьте права администратора."
+      MessageBox MB_ICONSTOP "Не удалось зарегистрировать службу RDP Manager Server (код $0). Закройте консоль служб и повторите установку.$\r$\n$\r$\nПодробности: $1"
       Abort
     ${EndIf}
     ExecWait 'netsh advfirewall firewall delete rule name="${RDP_FIREWALL_RULE}"' $0
