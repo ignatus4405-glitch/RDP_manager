@@ -30,6 +30,7 @@ function writeLatest(installerPath, outName) {
     `  - url: ${name}`,
     `    sha512: ${sha}`,
     `    size: ${size}`,
+    ...(outName === 'latest.yml' && pkg.build?.nsis?.perMachine === true ? ['    isAdminRightsRequired: true'] : []),
     `path: ${name}`,
     `sha512: ${sha}`,
     `releaseDate: '${new Date().toISOString()}'`,
