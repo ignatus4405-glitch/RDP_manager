@@ -1,21 +1,22 @@
 'use strict';
-const { randomUUID } = require('node:crypto');
+const { randomUUID, X509Certificate } = require('node:crypto');
 const { parseWebUrl, fillLogin } = require('./web-app-security');
 
 function createWebAppView(getWindow, electron = require('electron')) {
-  const { WebContentsView, session } = electron;
+  const { WebContentsView, session, app, dialog } = electron;
   let active = null;
   function close(id) {
     if (id && active?.id !== id) return;
     const state = active; active = null;
     if (!state) return;
     state.credentials = null;
+    if (state.certificateHandler) app.removeListener('certificate-error', state.certificateHandler);
     if (!state.window.isDestroyed()) state.window.contentView.removeChildView(state.view);
     if (!state.view.webContents.isDestroyed()) state.view.webContents.close();
     void state.session.clearStorageData().catch(() => {});
   }
   function report(state, message) {
-    if (active === state && !state.window.isDestroyed()) state.window.webContents.send('web-app-event', { id: state.id, message, origin: (() => { try { return new URL(state.view.webContents.getURL()).origin; } catch { return ''; } })() });
+    if (active === state && !state.window.isDestroyed()) state.window.webContents.send('web-app-event', { id: state.id, message: state.certificateAccepted ? `Сертификат принят вручную · ${message}` : message, origin: (() => { try { return new URL(state.view.webContents.getURL()).origin; } catch { return ''; } })() });
   }
   function bounds(id, rect) {
     if (!active || active.id !== id) return;
@@ -41,7 +42,7 @@ function createWebAppView(getWindow, electron = require('electron')) {
       callback({ cancel: false });
     });
     const view = new WebContentsView({ webPreferences: { session: ses, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
-    const state = { id: randomUUID(), window: win, view, session: ses, issue: null, credentials: options.password && options.username ? { username: options.username, password: options.password, origin: url.origin } : null };
+    const state = { id: randomUUID(), window: win, view, session: ses, issue: null, certificateAccepted: false, navigation: 0, credentials: options.password && options.username ? { username: options.username, password: options.password, origin: url.origin } : null };
     active = state; win.contentView.addChildView(view);
     // Do not collect URLs, response bodies or console text: these may contain secrets.
     const resourceTypes = new Set(['script', 'stylesheet', 'xhr', 'fetch']);
@@ -57,9 +58,38 @@ function createWebAppView(getWindow, electron = require('electron')) {
     });
     try { bounds(state.id, options.bounds); } catch (error) { close(state.id); throw error; }
     const wc = view.webContents;
+    // Exception is bound to this webContents, configured HTTPS origin and exact
+    // certificate, and exists only in this temporary partition. Never suppress TLS
+    // errors for the manager, unrelated hosts, redirects, or other windows.
+    const approved = new Set(), pending = new Map();
+    state.certificateHandler = (event, contents, requestUrl, error, certificate, callback) => {
+      if (contents !== wc || active !== state) return;
+      event.preventDefault();
+      let request, fingerprint;
+      try {
+        request = parseWebUrl(requestUrl);
+        if (request.origin !== url.origin || typeof error !== 'string' || !/^net::ERR_CERT_[A-Z_]+$/.test(error)) throw new Error('Unexpected certificate error');
+        fingerprint = new X509Certificate(certificate.data).fingerprint256;
+      } catch { callback(false); return; }
+      if (approved.has(fingerprint)) { callback(true); return; }
+      const revision = state.navigation;
+      let decision = pending.get(fingerprint);
+      if (!decision) {
+        const detail = `Адрес: ${url.origin}\nПричина: ${error}\nSHA-256: ${fingerprint}\n\nСертификат не подтверждён системой. Злоумышленник может перехватить логин, пароль и данные. Сверьте отпечаток с администратором по независимому каналу. Исключение действует только в этом открытом веб-окне. Сохранённые логин и пароль могут быть автоматически заполнены на сайте.`;
+        decision = Promise.resolve().then(() => dialog.showMessageBox(win, { type: 'warning', title: 'Недоверенный сертификат', message: 'Продолжить на сайт с недоверенным сертификатом?', detail, buttons: ['Отмена', 'Всё равно перейти'], defaultId: 0, cancelId: 0, noLink: true })).then((result) => result.response === 1).catch(() => false);
+        pending.set(fingerprint, decision);
+        void decision.then(() => { if (pending.get(fingerprint) === decision) pending.delete(fingerprint); });
+      }
+      void decision.then((accepted) => {
+        if (!accepted || active !== state || wc.isDestroyed() || state.navigation !== revision) { callback(false); return; }
+        approved.add(fingerprint); state.certificateAccepted = true;
+        callback(true);
+      });
+    };
+    app.on('certificate-error', state.certificateHandler);
     wc.setWindowOpenHandler(() => ({ action: 'deny' }));
     wc.on('will-navigate', (event, target) => { try { parseWebUrl(target); } catch { event.preventDefault(); report(state, 'Разрешены только HTTPS-страницы.'); } });
-    wc.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) state.issue = null; });
+    wc.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) { state.issue = null; state.navigation++; } });
     wc.on('did-navigate', () => { if (!state.issue) report(state, 'Страница открыта.'); });
     wc.on('render-process-gone', () => issue('Процесс страницы завершился. Попробуйте обновить страницу.'));
     wc.on('console-message', (_event, details) => { if (details?.level === 'error' || details === 3) issue('Ошибка скрипта веб-приложения. Проверьте работу в обычном браузере.'); });
