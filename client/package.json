@@ -1,6 +1,6 @@
 {
   "name": "rdp-manager-client",
-  "version": "1.4.21",
+  "version": "1.4.22",
   "private": true,
   "description": "Electron-клиент RDP Manager и GUI управления Windows-службой сервера",
   "main": "main.js",
