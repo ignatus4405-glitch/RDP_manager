@@ -8,6 +8,7 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { fileURLToPath } = require('node:url');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
 const { createRdpFileWriter } = require('./rdp-file-writer');
@@ -63,6 +64,16 @@ const sshSession = createSshSession({
   },
   chooseUpload: async () => { const result = await dialog.showOpenDialog(mainWindow, { title: 'Выберите файл для загрузки по SFTP', properties: ['openFile'] }); return result.canceled ? null : result.filePaths[0]; },
   chooseDownload: async (name) => { const result = await dialog.showSaveDialog(mainWindow, { title: 'Сохранить файл SFTP', defaultPath: name }); return result.canceled ? null : result.filePath; },
+  readClipboardFiles: async () => {
+    const items = await clipboard.read();
+    const item = items.find((entry) => entry.types.includes('text/uri-list'));
+    if (!item) return [];
+    const blob = await item.getType('text/uri-list');
+    if (blob.size > 1024 * 1024) throw new Error('Список файлов в буфере слишком велик.');
+    const urls = (await blob.text()).split(/\r?\n/).filter((line) => line && !line.startsWith('#'));
+    if (urls.length > 128) throw new Error('За один раз можно вставить до 128 файлов.');
+    return urls.map((url) => fileURLToPath(url));
+  },
   localStart: app.getPath('documents'),
   confirmOverwrite: async (target, location = 'remote') => (await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Файл уже существует', message: location === 'local' ? 'Перезаписать локальный файл?' : 'Перезаписать удалённый файл?', detail: target, buttons: ['Отмена', 'Перезаписать'], defaultId: 0, cancelId: 0, noLink: true })).response === 1,
 });
@@ -404,6 +415,16 @@ ipcMain.handle('ssh-close', (event, id) => { requireClientWindow(event); if (typ
 ipcMain.handle('ssh-write', (event, id, data) => { requireClientWindow(event); return sshSession.write(id, data); });
 ipcMain.handle('ssh-resize', (event, id, cols, rows) => { requireClientWindow(event); return sshSession.resize(id, cols, rows); });
 ipcMain.handle('ssh-list', (event, id, directory) => { requireClientWindow(event); return sshSession.list(id, directory); });
+ipcMain.handle('ssh-properties-open', (event, id, side, dir, name) => { requireClientWindow(event); return sshSession.propertiesOpen(id, side, dir, name); });
+ipcMain.handle('ssh-properties-save', (event, id, token, changes) => { requireClientWindow(event); return sshSession.propertiesSave(id, token, changes); });
+ipcMain.handle('ssh-properties-reset', (event, id) => { requireClientWindow(event); if (typeof id === 'string') sshSession.propertiesReset(id); });
+ipcMain.handle('ssh-editor-open', (event, id, side, dir, name) => { requireClientWindow(event); return sshSession.editorOpen(id, side, dir, name); });
+ipcMain.handle('ssh-editor-save', (event, id, token, text) => { requireClientWindow(event); return sshSession.editorSave(id, token, text); });
+ipcMain.handle('ssh-editor-reset', (event, id) => { requireClientWindow(event); if (typeof id === 'string') sshSession.editorReset(id); });
+ipcMain.handle('ssh-create-file', (event, id, side, directory, name) => { requireClientWindow(event); return sshSession.createFile(id, side, directory, name); });
+ipcMain.handle('ssh-create-link', (event, id, side, directory, name, target) => { requireClientWindow(event); return sshSession.createLink(id, side, directory, name, target); });
+ipcMain.handle('ssh-create-directory', (event, id, side, directory, name) => { requireClientWindow(event); return sshSession.createDirectory(id, side, directory, name); });
+ipcMain.handle('ssh-paste-files', (event, id, directory) => { requireClientWindow(event); return sshSession.pasteFiles(id, directory); });
 ipcMain.handle('ssh-local-list', (event, id, directory) => { requireClientWindow(event); return sshSession.localList(id, directory); });
 ipcMain.handle('ssh-transfer-between', (event, id, local, remote, name, direction) => { requireClientWindow(event); return sshSession.transferBetween(id, local, remote, name, direction); });
 ipcMain.handle('ssh-transfer', (event, id, remote, direction) => { requireClientWindow(event); return sshSession.transfer(id, remote, direction); });

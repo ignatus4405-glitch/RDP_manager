@@ -258,23 +258,63 @@
     <section id="sftpPanel" class="sftp-panel hidden" aria-label="Файловый менеджер SFTP">
       <div class="sftp-commandbar">
         <span class="sftp-command-label">Файловый менеджер <small>SFTP</small></span>
-        <div class="sftp-command-actions"><button id="sftpUpload" class="btn-ghost" disabled>Отправить →</button><button id="sftpDownload" class="btn-ghost" disabled>← Получить</button></div>
+        <div class="sftp-command-actions"><button id="sftpUpload" class="btn-ghost" disabled>Отправить →</button><button id="sftpDownload" class="btn-ghost" disabled>← Получить</button><button id="sftpProperties" class="btn-ghost" disabled>Свойства</button></div>
         <span class="sftp-command-hint">Выберите файл и нажмите кнопку передачи</span>
       </div>
       <div class="sftp-panes">
         <section class="sftp-pane" aria-label="Локальные файлы">
           <div class="sftp-pane-title"><span class="sftp-pane-icon">▣</span><div><strong>Этот компьютер</strong><small>Локальные файлы</small></div></div>
           <div class="sftp-toolbar"><button id="sftpLocalUp" class="sftp-tool" title="Вверх" aria-label="Локально: на уровень вверх">↑</button><button id="sftpLocalRefresh" class="sftp-tool" title="Обновить" aria-label="Обновить локальный каталог">↻</button><input id="sftpLocalPath" aria-label="Локальный путь" spellcheck="false" /><button id="sftpLocalGo" class="sftp-tool" title="Открыть путь" aria-label="Открыть локальный путь">→</button></div>
-          <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpLocalEntries"></tbody></table><div id="sftpLocalEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
+          <div id="sftpLocalList" class="sftp-list" tabindex="0"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpLocalEntries"></tbody></table><div id="sftpLocalEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
           <div id="sftpLocalSummary" class="sftp-summary">Локальный каталог</div>
         </section>
         <section class="sftp-pane" aria-label="Файлы на сервере">
           <div class="sftp-pane-title"><span class="sftp-pane-icon remote">▤</span><div><strong>Удалённый сервер</strong><small id="sftpRemoteHost">SFTP</small></div></div>
           <div class="sftp-toolbar"><button id="sftpUp" class="sftp-tool" title="Вверх" aria-label="На сервере: на уровень вверх">↑</button><button id="sftpRefresh" class="sftp-tool" title="Обновить" aria-label="Обновить удалённый каталог">↻</button><input id="sftpPath" aria-label="Удалённый путь" spellcheck="false" /><button id="sftpGo" class="sftp-tool" title="Открыть путь" aria-label="Открыть удалённый путь">→</button></div>
-          <div class="sftp-list"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpEntries"></tbody></table><div id="sftpRemoteEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
+          <div id="sftpRemoteList" class="sftp-list" tabindex="0"><table><thead><tr><th>Имя</th><th>Размер</th><th>Изменён</th></tr></thead><tbody id="sftpEntries"></tbody></table><div id="sftpRemoteEmpty" class="sftp-empty hidden">Каталог пуст</div></div>
           <div id="sftpRemoteSummary" class="sftp-summary">Удалённый каталог</div>
         </section>
       </div>
+      <div id="sftpContextMenu" class="sftp-context-menu hidden" role="menu" aria-label="Действия с файлами"></div>
+      <dialog id="sftpNewFolderDialog" class="sftp-dialog" aria-labelledby="sftpNewFolderTitle">
+        <form id="sftpNewFolderForm">
+          <h3 id="sftpNewFolderTitle">Новая папка</h3>
+          <p id="sftpNewFolderLocation" class="muted tiny"></p>
+          <label id="sftpNewObjectNameLabel" for="sftpNewFolderName">Имя</label>
+          <input id="sftpNewFolderName" maxlength="255" autocomplete="off" required />
+          <div id="sftpNewLinkTargetWrap" class="hidden">
+            <label for="sftpNewLinkTarget">Путь назначения ссылки на сервере</label>
+            <input id="sftpNewLinkTarget" maxlength="4096" autocomplete="off" placeholder="/path/to/target или относительный путь" />
+            <p class="muted tiny">Создаётся символическая ссылка; путь может указывать на ещё не существующий объект.</p>
+          </div>
+          <p id="sftpNewFolderError" class="login-error" role="alert"></p>
+          <div class="sftp-dialog-actions"><button id="sftpNewFolderCancel" type="button" class="btn-ghost">Отмена</button><button id="sftpNewFolderCreate" type="submit" class="btn-primary">Создать</button></div>
+        </form>
+      </dialog>
+      <dialog id="sftpPropertiesDialog" class="sftp-dialog sftp-properties-dialog" aria-labelledby="sftpPropertiesTitle">
+        <form id="sftpPropertiesForm">
+          <h3 id="sftpPropertiesTitle">Свойства</h3>
+          <div class="sftp-properties-details"><div><span>Имя</span><strong id="sftpPropName"></strong></div><div><span>Папка</span><strong id="sftpPropDirectory"></strong></div><div><span>Тип</span><strong id="sftpPropType"></strong></div><div><span>Размер</span><strong id="sftpPropSize"></strong></div><div><span>Изменён</span><strong id="sftpPropDate"></strong></div></div>
+          <div class="sftp-properties-owners"><div><label for="sftpPropUid">Владелец (UID)</label><input id="sftpPropUid" inputmode="numeric" pattern="[0-9]+" /></div><div><label for="sftpPropGid">Группа (GID)</label><input id="sftpPropGid" inputmode="numeric" pattern="[0-9]+" /></div></div>
+          <fieldset id="sftpPropPermissions"><legend>Разрешения</legend>
+            <div class="sftp-perm-grid"><span></span><span>R</span><span>W</span><span>X</span><span>Дополнительно</span>
+              <span>Владелец</span><input type="checkbox" id="sftpPerm400" aria-label="Владелец: чтение" /><input type="checkbox" id="sftpPerm200" aria-label="Владелец: запись" /><input type="checkbox" id="sftpPerm100" aria-label="Владелец: выполнение" /><label><input type="checkbox" id="sftpPerm4000" /> Set UID</label>
+              <span>Группа</span><input type="checkbox" id="sftpPerm40" aria-label="Группа: чтение" /><input type="checkbox" id="sftpPerm20" aria-label="Группа: запись" /><input type="checkbox" id="sftpPerm10" aria-label="Группа: выполнение" /><label><input type="checkbox" id="sftpPerm2000" /> Set GID</label>
+              <span>Прочие</span><input type="checkbox" id="sftpPerm4" aria-label="Прочие: чтение" /><input type="checkbox" id="sftpPerm2" aria-label="Прочие: запись" /><input type="checkbox" id="sftpPerm1" aria-label="Прочие: выполнение" /><label><input type="checkbox" id="sftpPerm1000" /> Липкий бит</label>
+            </div>
+            <label for="sftpPropOctal">Восьмеричное значение</label><input id="sftpPropOctal" maxlength="4" inputmode="numeric" pattern="[0-7]{3,4}" placeholder="0755" />
+          </fieldset>
+          <p id="sftpPropertiesNote" class="muted tiny"></p><p id="sftpPropertiesError" class="login-error" role="alert"></p>
+          <div class="sftp-dialog-actions"><button id="sftpPropertiesCancel" type="button" class="btn-ghost">Закрыть</button><button id="sftpPropertiesSave" type="submit" class="btn-primary" disabled>Применить</button></div>
+        </form>
+      </dialog>
+      <dialog id="sftpEditorDialog" class="sftp-editor-dialog" aria-labelledby="sftpEditorTitle">
+        <div class="sftp-editor-header"><div><strong id="sftpEditorTitle">Изменение файла</strong><div id="sftpEditorPath" class="muted tiny"></div></div><button id="sftpEditorClose" type="button" class="icon-btn" aria-label="Закрыть редактор">✕</button></div>
+        <div class="sftp-editor-note">Текст UTF-8 до 2 МиБ. Сохранение изменяет файл на месте; при обрыве записи файл может быть повреждён.</div>
+        <textarea id="sftpEditorText" aria-label="Содержимое файла" spellcheck="false"></textarea>
+        <div id="sftpEditorError" class="sftp-editor-error" role="alert"></div>
+        <div class="sftp-editor-footer"><span id="sftpEditorStatus">Загрузка…</span><button id="sftpEditorCancel" type="button" class="btn-ghost">Закрыть</button><button id="sftpEditorSave" type="button" class="btn-primary" disabled>Сохранить</button></div>
+      </dialog>
       <div class="sftp-footer"><span id="sftpMessage">Подключение…</span><progress id="sftpProgress" class="hidden" max="100" value="0"></progress><span>Передача отдельных файлов</span></div>
     </section>
   </div>
