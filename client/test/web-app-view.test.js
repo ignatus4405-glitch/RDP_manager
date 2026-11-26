@@ -2,6 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
+const { X509Certificate } = require('node:crypto');
 const { createWebAppView } = require('../web-app-view');
 function setup() {
   const reports = [], views = [], sessions = [];
@@ -15,9 +18,10 @@ function setup() {
     async executeJavaScriptInIsolatedWorld(id, scripts) { this.code.push({ id, scripts }); return true; }
   }
   class View { constructor(options) { this.options = options; this.webContents = new Contents(); views.push(this); } setBounds(bounds) { this.rect = bounds; } }
-  const electron = { WebContentsView: View, session: { fromPartition(name) { const ses = new EventEmitter(); ses.name = name; ses.webRequest = { onBeforeRequest(cb) { ses.filter = cb; }, onErrorOccurred(cb) { ses.error = cb; }, onCompleted(cb) { ses.completed = cb; } }; ses.setPermissionRequestHandler = (cb) => { ses.permission = cb; }; ses.setPermissionCheckHandler = (cb) => { ses.check = cb; }; ses.clearStorageData = async () => { ses.cleared = true; }; sessions.push(ses); return ses; } } };
+  const app = new EventEmitter(); const prompts = []; let answer = async () => ({ response: 0 });
+  const electron = { app, dialog: { showMessageBox: async (_win, options) => { prompts.push(options); return answer(); } }, WebContentsView: View, session: { fromPartition(name) { const ses = new EventEmitter(); ses.name = name; ses.webRequest = { onBeforeRequest(cb) { ses.filter = cb; }, onErrorOccurred(cb) { ses.error = cb; }, onCompleted(cb) { ses.completed = cb; } }; ses.setPermissionRequestHandler = (cb) => { ses.permission = cb; }; ses.setPermissionCheckHandler = (cb) => { ses.check = cb; }; ses.clearStorageData = async () => { ses.cleared = true; }; sessions.push(ses); return ses; } } };
   const win = { isDestroyed: () => false, contentView: { addChildView() {}, removeChildView() {} }, getContentSize: () => [800, 600], webContents: { send(_name, data) { reports.push(data); } } };
-  return { manager: createWebAppView(() => win, electron), views, sessions, reports };
+  return { manager: createWebAppView(() => win, electron), views, sessions, reports, app, prompts, setAnswer: (fn) => { answer = fn; } };
 }
 const options = { url: 'https://example.com/login', username: 'user', password: 'secret', bounds: { x: 0, y: 50, width: 800, height: 550 } };
 test('embedded view is sandboxed and isolated; navigation and permissions restricted', async () => {
@@ -47,4 +51,33 @@ test('reports resource and script errors without leaking URLs or console content
   wc.emit('did-start-navigation', {}, '', false, true);
   ses.completed({ resourceType: 'mainFrame', statusCode: 503 }); assert.match(reports.at(-1).message, /HTTP 503/);
   manager.close(); const length = reports.length; ses.error({ resourceType: 'script', error: 'net::ERR_FAILED' }); assert.equal(reports.length, length);
+});
+
+const cert = { data: fs.readFileSync(path.join(__dirname, '../../server/test/fixtures/rdp-test-cert.pem'), 'utf8') };
+function certificateRequest(app, wc, url, certificate = cert, error = 'net::ERR_CERT_AUTHORITY_INVALID') {
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  let resolve; const result = new Promise((r) => { resolve = r; });
+  app.emit('certificate-error', event, wc, url, error, certificate, resolve);
+  return { event, result };
+}
+test('certificate exception requires explicit approval and is scoped to the configured origin and window', async () => {
+  const { manager, views, app, prompts, setAnswer, reports } = setup(); manager.open(options); const wc = views[0].webContents;
+  setAnswer(async () => ({ response: 1 }));
+  let req = certificateRequest(app, wc, 'https://other.example/file'); assert.equal(req.event.prevented, true); assert.equal(await req.result, false); assert.equal(prompts.length, 0);
+  req = certificateRequest(app, wc, 'https://example.com:444/file'); assert.equal(await req.result, false); assert.equal(prompts.length, 0);
+  req = certificateRequest(app, wc, 'https://example.com/'); assert.equal(await req.result, true); assert.equal(prompts.length, 1);
+  assert.match(prompts[0].detail, new RegExp(new X509Certificate(cert.data).fingerprint256)); assert.match(prompts[0].detail, /пароль/);
+  req = certificateRequest(app, wc, 'https://example.com/resource'); assert.equal(await req.result, true); assert.equal(prompts.length, 1);
+  req = certificateRequest(app, wc, 'https://example.com/', { data: 'bad certificate' }); assert.equal(await req.result, false);
+  wc.emit('did-finish-load'); await new Promise(setImmediate); assert.equal(wc.code.length, 1); assert.match(wc.code[0].scripts[0].code, /secret/); assert.match(reports.at(-1).message, /принят вручную/);
+  manager.close(); assert.equal(app.listenerCount('certificate-error'), 0);
+  manager.open(options); req = certificateRequest(app, views[1].webContents, 'https://example.com/'); assert.equal(await req.result, true); assert.equal(prompts.length, 2); manager.close();
+});
+test('certificate rejection and closing or navigating during confirmation never grant an exception', async () => {
+  const { manager, views, app, setAnswer, prompts } = setup(); manager.open(options); const wc = views[0].webContents;
+  let req = certificateRequest(app, wc, 'https://example.com/'); assert.equal(await req.result, false);
+  let resolve; setAnswer(() => new Promise((r) => { resolve = r; }));
+  req = certificateRequest(app, wc, 'https://example.com/'); const req2 = certificateRequest(app, wc, 'https://example.com/file'); await new Promise(setImmediate); assert.equal(prompts.length, 2);
+  wc.emit('did-start-navigation', {}, '', false, true); resolve({ response: 1 }); assert.equal(await req.result, false); assert.equal(await req2.result, false);
+  req = certificateRequest(app, wc, 'https://example.com/'); await new Promise(setImmediate); manager.close(); resolve({ response: 1 }); assert.equal(await req.result, false);
 });
