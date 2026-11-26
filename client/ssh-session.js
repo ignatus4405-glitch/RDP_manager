@@ -4,15 +4,19 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { Client } = require('ssh2');
+const { createSftpEditor } = require('./sftp-editor');
+const { createSftpProperties } = require('./sftp-properties');
 
 // SSH runs in the Electron main process, never in the remote site's context.
 // The user confirms the server key before any password is sent.
-function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, localStart = os.homedir(), makeClient = () => new Client() }) {
+function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, confirmOverwrite, readClipboardFiles = async () => [], localStart = os.homedir(), makeClient = () => new Client() }) {
   let current = null;
+  const editor = createSftpEditor({ getState: (id) => get(id, 'sftp'), isCurrent: (state) => state === current });
+  const properties = createSftpProperties({ getState: (id) => get(id, 'sftp'), isCurrent: (state) => state === current });
   function send(state, type, extra = {}) { if (state === current) emit({ id: state.id, type, ...extra }); }
   function close(id) {
     if (!current || (id && current.id !== id)) return;
-    const state = current; current = null;
+    const state = current; current = null; editor.reset(); properties.reset();
     try { state.channel?.close(); } catch {}
     try { state.client.end(); } catch {}
   }
@@ -33,7 +37,7 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
     current = state;
     const fail = (err) => { if (current !== state) return; send(state, 'error', { message: String(err?.message || 'Ошибка SSH').slice(0, 500) }); close(state.id); };
     state.client.on('error', fail);
-    state.client.on('close', () => { if (current === state) { send(state, 'close'); current = null; } });
+    state.client.on('close', () => { if (current === state) { send(state, 'close'); current = null; editor.reset(); properties.reset(); } });
     state.client.on('ready', () => {
       if (current !== state) return;
       if (mode === 'ssh') {
@@ -140,6 +144,70 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
       return { ok: true };
     } finally { state.busy = false; if (tmp) await fs.rm(tmp, { force: true }).catch(() => {}); }
   }
+  async function createDirectory(id, side, directory, name) {
+    const state = get(id, 'sftp'); validPath(directory); validName(name, side === 'local' && process.platform === 'win32');
+    if (state.busy) throw new Error('Другая передача ещё выполняется.');
+    if (side === 'local') {
+      if (!path.isAbsolute(directory)) throw new Error('Укажите абсолютный локальный путь.');
+      await fs.mkdir(path.join(directory, name));
+    } else if (side === 'remote') {
+      if (!directory.startsWith('/')) throw new Error('Укажите абсолютный путь на сервере.');
+      await new Promise((resolve, reject) => state.sftp.mkdir(path.posix.join(directory, name), (err) => err ? reject(err) : resolve()));
+    } else throw new Error('Неизвестная панель.');
+    if (current !== state) throw new Error('SSH-сеанс закрыт.');
+    return { ok: true };
+  }
+  async function createFile(id, side, directory, name) {
+    const state = get(id, 'sftp'); validPath(directory); validName(name, side === 'local' && process.platform === 'win32');
+    if (state.busy) throw new Error('Другая передача ещё выполняется.');
+    if (side === 'local') {
+      if (!path.isAbsolute(directory)) throw new Error('Укажите абсолютный локальный путь.');
+      const handle = await fs.open(path.join(directory, name), 'wx');
+      await handle.close();
+    } else if (side === 'remote') {
+      if (!directory.startsWith('/')) throw new Error('Укажите абсолютный путь на сервере.');
+      const remote = path.posix.join(directory, name);
+      const handle = await new Promise((resolve, reject) => state.sftp.open(remote, 'wx', (err, value) => err ? reject(err) : resolve(value)));
+      await new Promise((resolve, reject) => state.sftp.close(handle, (err) => err ? reject(err) : resolve()));
+    } else throw new Error('Неизвестная панель.');
+    if (current !== state) throw new Error('SSH-сеанс закрыт.');
+    return { ok: true };
+  }
+  async function createLink(id, side, directory, name, target) {
+    const state = get(id, 'sftp'); validPath(directory); validName(name); validPath(target);
+    if (state.busy) throw new Error('Другая передача ещё выполняется.');
+    if (side !== 'remote') throw new Error('Создание ссылок доступно только на сервере SFTP.');
+    if (!directory.startsWith('/')) throw new Error('Укажите абсолютный путь на сервере.');
+    await new Promise((resolve, reject) => state.sftp.symlink(target, path.posix.join(directory, name), (err) => err ? reject(err) : resolve()));
+    if (current !== state) throw new Error('SSH-сеанс закрыт.');
+    return { ok: true };
+  }
+  async function pasteFiles(id, remoteDirectory) {
+    const state = get(id, 'sftp'); validPath(remoteDirectory);
+    if (!remoteDirectory.startsWith('/')) throw new Error('Укажите абсолютный путь на сервере.');
+    if (state.busy) throw new Error('Другая передача ещё выполняется.');
+    const files = await readClipboardFiles();
+    if (current !== state) throw new Error('SSH-сеанс закрыт.');
+    if (!Array.isArray(files) || files.length === 0) throw new Error('В буфере обмена нет локальных файлов.');
+    if (files.length > 128) throw new Error('За один раз можно вставить до 128 файлов.');
+    // Validate all entries before starting; directories and links are not copied.
+    for (const file of files) {
+      validPath(file);
+      if (!path.isAbsolute(file)) throw new Error('Некорректный путь в буфере обмена.');
+      validName(path.basename(file));
+      if (!(await fs.lstat(file)).isFile()) throw new Error('Можно вставлять только отдельные обычные файлы, не папки и не ссылки.');
+    }
+    let count = 0;
+    for (const file of files) {
+      if (current !== state) throw new Error('SSH-сеанс закрыт.');
+      let result;
+      try { result = await transferBetween(id, path.dirname(file), remoteDirectory, path.basename(file), 'upload'); }
+      catch (error) { if (count) throw new Error(`Передано файлов: ${count}. Ошибка: ${error.message}`); throw error; }
+      if (result.cancelled) return { cancelled: true, count };
+      count++;
+    }
+    return { ok: true, count };
+  }
   async function transfer(id, remote, direction) {
     const state = get(id, 'sftp'); validPath(remote);
     if (state.busy) throw new Error('Другая передача ещё выполняется.');
@@ -168,6 +236,6 @@ function createSshSession({ verifyHost, emit, chooseUpload, chooseDownload, conf
       return { ok: true };
     } finally { state.busy = false; if (tmp) await fs.rm(tmp, { force: true }).catch(() => {}); }
   }
-  return { open, close, write, resize, list, localList, transfer, transferBetween };
+  return { open, close, write, resize, list, localList, transfer, transferBetween, createDirectory, createFile, createLink, pasteFiles, propertiesOpen: properties.open, propertiesSave: properties.save, propertiesReset: (id) => { get(id, 'sftp'); properties.reset(); }, editorOpen: editor.open, editorSave: editor.save, editorReset: (id) => { get(id, 'sftp'); editor.reset(); } };
 }
 module.exports = { createSshSession };

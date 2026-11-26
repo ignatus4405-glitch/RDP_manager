@@ -350,3 +350,45 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 700px) { .sftp-command-hint { display: none; } .sftp-pane-title small { max-width: 30vw; } }
 
 .conn-type.web { background: #a78bfa22; color: #c4b5fd; border: 1px solid #a78bfa44; }
+
+/* SFTP context menu */
+.sftp-context-menu { position: fixed; z-index: 450; min-width: 240px; padding: 5px; background: #202c3b; border: 1px solid #46566b; border-radius: 7px; box-shadow: 0 10px 30px #0009; }
+.sftp-context-menu button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px 10px; border: 0; border-radius: 4px; background: transparent; color: #e3edf9; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.sftp-context-menu button:hover, .sftp-context-menu button:focus-visible { background: #36577e; outline: none; }
+.sftp-context-menu button:disabled { opacity: .42; cursor: default; background: transparent; }
+.sftp-context-menu .sftp-menu-icon { width: 18px; text-align: center; color: #9ac1ff; }
+.sftp-context-menu .sftp-menu-label { flex: 1; }
+.sftp-context-menu .sftp-menu-key { color: #9aadc6; font-size: 11px; }
+.sftp-context-menu hr { border: 0; border-top: 1px solid #455469; margin: 4px 5px; }
+.sftp-dialog { width: min(420px, calc(100vw - 32px)); padding: 22px; color: #e3edf9; background: #182333; border: 1px solid #40516a; border-radius: 10px; }
+.sftp-dialog::backdrop { background: #0009; }
+.sftp-dialog h3 { margin: 0 0 8px; }
+.sftp-dialog input { width: 100%; }
+.sftp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+.sftp-submenu-wrap { position: relative; }
+.sftp-submenu { position: absolute; left: 100%; bottom: -5px; z-index: 1; min-width: 205px; padding: 5px; background: #202c3b; border: 1px solid #46566b; border-radius: 7px; box-shadow: 0 10px 30px #0009; }
+.sftp-submenu-wrap.opens-left .sftp-submenu { left: auto; right: 100%; }
+
+.sftp-editor-dialog { width: min(1000px, calc(100vw - 40px)); height: min(760px, calc(100vh - 40px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #40516a; border-radius: 10px; background: #141e2c; color: #e3edf9; overflow: hidden; }
+.sftp-editor-dialog[open] { display: flex; flex-direction: column; }
+.sftp-editor-dialog::backdrop { background: #000a; }
+.sftp-editor-header, .sftp-editor-footer { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.sftp-editor-header > div, .sftp-editor-footer > span { flex: 1; min-width: 0; }
+.sftp-editor-header .tiny { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sftp-editor-note { color: #b6c4d7; font-size: 11px; padding: 0 16px 8px; }
+.sftp-editor-dialog textarea { flex: 1; min-height: 0; resize: none; width: 100%; margin: 0; padding: 14px; border: 1px solid #344257; border-radius: 0; background: #0b111a; color: #e2e8f0; font: 13px/1.5 Consolas, 'Courier New', monospace; tab-size: 4; white-space: pre; overflow: auto; }
+.sftp-editor-error { color: #fca5a5; padding: 0 16px; font-size: 12px; }
+.sftp-editor-footer { font-size: 12px; color: #aabbd1; }
+
+.sftp-properties-dialog { max-height: calc(100vh - 32px); overflow: auto; }
+.sftp-properties-details { display: grid; gap: 6px; border-bottom: 1px solid #344257; padding: 8px 0 12px; font-size: 12px; }
+.sftp-properties-details > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.sftp-properties-details span { color: #a5b4c9; }
+.sftp-properties-details strong { overflow-wrap: anywhere; font-weight: 500; }
+.sftp-properties-owners { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+.sftp-properties-dialog fieldset { border: 1px solid #40516a; border-radius: 6px; padding: 10px; }
+.sftp-perm-grid { display: grid; grid-template-columns: 1fr repeat(3, 24px) 115px; align-items: center; gap: 7px; font-size: 12px; }
+.sftp-perm-grid input[type=checkbox] { width: auto; margin: 0; }
+.sftp-perm-grid label { margin: 0; white-space: nowrap; }
+.sftp-properties-dialog #sftpPropOctal { width: 90px; }

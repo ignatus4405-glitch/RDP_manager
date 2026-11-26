@@ -35,6 +35,8 @@
     "files": [
       "main.js",
       "ssh-session.js",
+      "sftp-editor.js",
+      "sftp-properties.js",
       "web-app-view.js",
       "web-app-security.js",
       "preload.js",
