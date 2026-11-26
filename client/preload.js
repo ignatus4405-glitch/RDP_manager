@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('rdpManager', {
   platform: process.platform,
   rdpLayoutFocus: (focused, token) => ipcRenderer.send('rdp-layout-focus', Boolean(focused), token),
   onRdpLayoutSwitch: (cb) => bindChannel('rdp-layout-switch', cb),
+  localCredentials: {
+    get: (scope) => ipcRenderer.invoke('local-credentials-get', scope),
+    put: (scope, value) => ipcRenderer.invoke('local-credentials-put', scope, value),
+    remove: (scope) => ipcRenderer.invoke('local-credentials-remove', scope),
+  },
   webApp: {
     open: (options) => ipcRenderer.invoke('web-app-open', options),
     close: (id) => ipcRenderer.invoke('web-app-close', id),

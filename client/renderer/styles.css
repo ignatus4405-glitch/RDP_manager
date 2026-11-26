@@ -288,7 +288,7 @@ button { font-family: inherit; cursor: pointer; }
 .rdp-body { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 
 .rdp-connect-form {
-  width: 440px; max-width: calc(100vw - 40px);
+  width: 440px; max-width: calc(100vw - 40px); max-height: calc(100% - 20px); overflow-y: auto;
   background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 26px;
 }
 .rdp-connect-form h3 { font-size: 17px; margin-bottom: 8px; }
@@ -299,6 +299,7 @@ button { font-family: inherit; cursor: pointer; }
   width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 10px; padding: 11px 13px; font-size: 14px; outline: none; user-select: text;
 }
+.rdp-connect-form input[type="checkbox"] { width: auto; padding: 0; margin-right: 6px; }
 .rdp-connect-form input:focus { border-color: var(--accent); }
 .tiny { font-size: 11px !important; color: var(--muted); margin: 12px 0 0 !important; line-height: 1.5; }
 

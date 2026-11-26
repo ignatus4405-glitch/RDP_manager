@@ -34,6 +34,7 @@
     "productName": "RDP Manager",
     "files": [
       "main.js",
+      "local-credentials.js",
       "ssh-session.js",
       "sftp-editor.js",
       "sftp-operations.js",

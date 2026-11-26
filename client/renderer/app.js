@@ -56,6 +56,11 @@ async function api(path, opts = {}) {
 }
 
 const isAdmin = () => state.user?.role === 'admin';
+window.personalCredentialScope = (conn) => {
+  if (!window.rdpManager?.localCredentials || window.rdpManager.platform !== 'win32' || !state.user?.id || !conn?.id || !['rdp', 'rustdesk'].includes(conn.type)) return null;
+  return { server: state.serverUrl, userId: state.user.id, userName: state.user.username, connectionId: conn.id, type: conn.type, target: JSON.stringify([conn.address, conn.port || '', conn.rustdesk_server || '', conn.rustdesk_key || '', conn.type === 'rustdesk' ? localStorage.getItem('rustdesk_server') || '' : '', conn.type === 'rustdesk' ? localStorage.getItem('rustdesk_public_key') || '' : '']) };
+};
+
 
 /* ================= Модалка ================= */
 function openModal(title, bodyHtml, footerButtons) {
@@ -284,7 +289,7 @@ const rdpSession = {
 
 let rdpConnectionAttempt = 0;
 let rdpCredentialGeneration = 0;
-$('rdpPassword').addEventListener('input', () => { rdpCredentialGeneration++; });
+for (const id of ['rdpUsername', 'rdpDomain', 'rdpPassword']) $(id).addEventListener('input', () => { rdpCredentialGeneration++; });
 let rdpLayoutFocusToken = 0;
 let releaseRdpKeys = () => {};
 
@@ -384,14 +389,33 @@ function openEmbeddedRdp(conn) {
   $('rdpDisconnectBtn').disabled = true;
   $('rdpOverlay').classList.remove('hidden');
   setTimeout(() => $('rdpPassword').focus(), 60);
-  if (conn.has_secret && window.canSendConnectionSecret(state.serverUrl)) {
+  const scope = window.personalCredentialScope(conn);
+  $('rdpRemember').disabled = !scope; $('rdpForget').disabled = !scope; $('rdpRemember').checked = Boolean(scope);
+  const selected = conn;
+  (async () => {
+    if (scope) {
+      try {
+        const saved = await window.rdpManager.localCredentials.get(scope);
+        if (rdpCredentialGeneration !== credentialGeneration || rdpSession.conn !== selected || $('rdpOverlay').classList.contains('hidden')) return;
+        if (saved && typeof saved.username === 'string' && typeof saved.password === 'string' && typeof saved.domain === 'string') { $('rdpUsername').value = saved.username; $('rdpDomain').value = saved.domain; $('rdpPassword').value = saved.password; return; }
+      } catch (error) { if (rdpCredentialGeneration !== credentialGeneration || rdpSession.conn !== selected) return; $('rdpFormError').textContent = `Локальные данные недоступны: ${error.message}`; }
+    }
+    if (rdpCredentialGeneration !== credentialGeneration || rdpSession.conn !== selected) return;
+    if (conn.has_secret && window.canSendConnectionSecret(state.serverUrl)) {
+
     // Never overwrite text entered by the user or a subsequently opened card.
     const selected = conn;
     api('/connections/' + conn.id + '/secret', { noStore: true }).then(({ password }) => {
       if (rdpCredentialGeneration === credentialGeneration && rdpSession.conn === selected && !$('rdpOverlay').classList.contains('hidden') && !$('rdpPassword').value && typeof password === 'string') $('rdpPassword').value = password;
     }).catch(() => { if (rdpCredentialGeneration === credentialGeneration && rdpSession.conn === selected) $('rdpFormError').textContent = 'Не удалось получить сохранённый пароль; введите его вручную.'; });
-  } else if (conn.has_secret) $('rdpFormError').textContent = 'Для сохранённого пароля подключитесь к серверу по HTTPS или введите пароль вручную.';
+    } else if (conn.has_secret) $('rdpFormError').textContent = 'Для сохранённого пароля подключитесь к серверу по HTTPS или введите пароль вручную.';
+  })();
 }
+$('rdpForget').addEventListener('click', async () => {
+  const selected = rdpSession.conn, scope = window.personalCredentialScope(selected); if (!scope) return;
+  const generation = ++rdpCredentialGeneration;
+  try { await window.rdpManager.localCredentials.remove(scope); if (rdpSession.conn === selected && generation === rdpCredentialGeneration) { $('rdpPassword').value = ''; $('rdpRemember').checked = false; toast('Локальные данные удалены'); } } catch (error) { if (rdpSession.conn === selected && generation === rdpCredentialGeneration) $('rdpFormError').textContent = error.message; }
+});
 
 function teardownRdpSession() {
   rdpLayoutFocusToken++;
@@ -759,6 +783,9 @@ async function startEmbeddedRdp() {
   catch (error) { $('rdpFormError').textContent = error.message; return; }
   const username = credentials.username;
   const password = $('rdpPassword').value;
+  const localScope = window.personalCredentialScope(conn);
+  const rememberCredentials = $('rdpRemember').checked;
+  const localValue = { username: $('rdpUsername').value, domain: $('rdpDomain').value, password };
   const formError = $('rdpFormError');
   formError.textContent = '';
   if (!password) { formError.textContent = 'Введите пароль'; return; }
@@ -891,6 +918,10 @@ async function startEmbeddedRdp() {
     const session = await builder.connect();
     if (!isCurrentAttempt()) { try { session.shutdown(); } catch { /* already closed */ } return; }
     rdpSession.session = session;
+    if (localScope) {
+      const save = rememberCredentials ? window.rdpManager.localCredentials.put(localScope, localValue) : window.rdpManager.localCredentials.remove(localScope);
+      void save.catch((error) => toast(`Не удалось сохранить локальные данные: ${error.message}`, true));
+    }
 
     const ds = session.desktopSize();
     canvas.width = ds.width;

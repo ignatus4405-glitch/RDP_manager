@@ -7,7 +7,7 @@ const path = require('node:path');
 const { directRustDeskConfig, directRelayUrl } = require('../renderer/rustdesk-config');
 const { createRustDeskClipboardSync } = require('../renderer/rustdesk-clipboard');
 
-function setup(protocol = 'file:') {
+function setup(protocol = 'file:', credentials = null) {
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) {
@@ -31,6 +31,7 @@ function setup(protocol = 'file:') {
   }
   class Viewer { constructor() { this.handlers = {}; } on(n, f) { this.handlers[n] = f; } destroy() { this.destroyed = true; } }
   const window = { location: { protocol }, RustDeskWeb: { Session, Viewer }, RustDeskConfig: { directRustDeskConfig, directRelayUrl }, createRustDeskClipboardSync, rdpManager: { writeClipboard: async () => {}, fileTransfer: { readTextOnly: async () => null } } };
+  if (credentials) { window.personalCredentialScope = () => ({ id: 1 }); window.rdpManager.localCredentials = credentials; }
   const context = { window, document: { getElementById: element, createElement: () => ({}) }, localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) }, VideoDecoder: function () {}, EncodedVideoChunk: function () {}, console };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/rustdesk.js'), 'utf8'), context);
@@ -102,4 +103,23 @@ test('per-connection configuration takes precedence, old cards retain local fall
   void h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
   await Promise.resolve();
   assert.equal(h.sessions.at(-1).options.server.rendezvousUrl, 'ws://legacy.example:21118/');
+});
+
+test('RustDesk saves a device password after connection but never a two-factor code', async () => {
+  let saved; const credentials = { get: async () => ({ password: 'saved' }), put: async (_scope, value) => { saved = value; }, remove: async () => {} };
+  const h = setup('file:', credentials); await Promise.resolve(); await Promise.resolve();
+  assert.equal(h.element('rustdeskPassword').value, 'saved');
+  void h.element('rustdeskForm').handlers.submit({ preventDefault() {} }); await Promise.resolve();
+  const session = h.sessions[0]; session.handlers.password({ wrong: false }); await Promise.resolve();
+  session.handlers.twoFactor({ wrong: false }); h.element('rustdeskPassword').value = '123456';
+  await h.element('rustdeskForm').handlers.submit({ preventDefault() {} });
+  session.handlers.connected({}); await Promise.resolve();
+  assert.equal(saved.password, 'saved'); assert.notEqual(saved.password, '123456');
+  h.window.closeEmbeddedRustDesk();
+});
+
+test('late RustDesk credential lookup never overwrites user input', async () => {
+  let resolve; const credentials = { get: () => new Promise((r) => { resolve = r; }), put: async () => {}, remove: async () => {} };
+  const h = setup('file:', credentials); h.element('rustdeskPassword').value = 'typing'; h.element('rustdeskPassword').handlers.input();
+  resolve({ password: 'old' }); await Promise.resolve(); await Promise.resolve(); assert.equal(h.element('rustdeskPassword').value, 'typing');
 });

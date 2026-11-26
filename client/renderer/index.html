@@ -219,6 +219,8 @@
       <input id="rdpDomain" autocomplete="off" spellcheck="false" placeholder="DOMAIN" />
       <label for="rdpPassword">Пароль</label>
       <input id="rdpPassword" type="password" autocomplete="off" placeholder="Пароль RDP" />
+      <label><input id="rdpRemember" type="checkbox" checked /> Сохранить мои данные на этом компьютере</label>
+      <button id="rdpForget" type="button" class="btn-ghost">Удалить сохранённые данные</button>
       <p id="rdpFormError" class="login-error"></p>
       <button type="submit" id="rdpConnectBtn" class="btn-primary big">Подключиться</button>
       <p class="muted tiny">Трафик идёт через сервер RDP Manager по WebSocket (RDCleanPath) — сервер должен иметь сетевой доступ к RDP-узлу. Встроенный клиент: CredSSP/NLA, клавиатура, мышь, колёсико, буфер обмена.</p>
@@ -239,6 +241,8 @@
       <h3>Встроенный RustDesk</h3>
       <p class="muted tiny">Экспериментальная версия. Подключение напрямую по WS без TLS: метаданные соединения видимы сети. Проверка публичного ключа обязательна. Системная вставка файлов пока не поддерживается.</p>
       <label for="rustdeskPassword">Пароль удалённого устройства</label><input id="rustdeskPassword" type="password" autocomplete="off" />
+      <label><input id="rustdeskRemember" type="checkbox" checked /> Сохранить мой пароль на этом компьютере</label>
+      <button id="rustdeskForget" type="button" class="btn-ghost">Удалить сохранённый пароль</button>
       <p id="rustdeskError" class="login-error"></p><button id="rustdeskConnect" type="submit" class="btn-primary big">Подключиться</button>
     </form>
     <div id="rustdeskViewer" class="rustdesk-viewer hidden"></div>
