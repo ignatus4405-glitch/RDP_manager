@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const { installConsoleFileLogger } = require('./file-logger');
 const { safeRequestPath } = require('./request-log');
+const { HTTP_TIMEOUT_OPTIONS } = require('./http-timeouts');
 try { installConsoleFileLogger(); }
 catch (error) { console.warn('Не удалось открыть файл журнала сервера:', error.message); }
 const express = require('express');
@@ -73,7 +74,9 @@ const certPath = process.env.RDP_MANAGER_TLS_CERT;
 const keyPath = process.env.RDP_MANAGER_TLS_KEY;
 if (Boolean(certPath) !== Boolean(keyPath)) throw new Error('Укажите оба параметра RDP_MANAGER_TLS_CERT и RDP_MANAGER_TLS_KEY.');
 const tlsEnabled = Boolean(certPath);
-const server = tlsEnabled ? https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath), minVersion: 'TLSv1.2' }, app) : http.createServer(app);
+const server = tlsEnabled
+  ? https.createServer({ ...HTTP_TIMEOUT_OPTIONS, cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath), minVersion: 'TLSv1.2' }, app)
+  : http.createServer(HTTP_TIMEOUT_OPTIONS, app);
 // RDP-шлюз (RDCleanPath поверх WebSocket) для встроенных RDP-сессий в клиенте
 attachRdpGateway(server, { path: '/ws/rdp' });
 

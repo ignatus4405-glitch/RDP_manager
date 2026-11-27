@@ -225,6 +225,23 @@ jobs:
         with:
           name: server-installers-linux
           path: release/server
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Установка генератора SBOM
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: npm ci
+      - name: Формирование CycloneDX SBOM npm-зависимостей
+        env:
+          NODE_ENV: development
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release/sbom
+          npm run sbom -- --output-file "release/sbom/RDPManager-${version}-npm-sbom.cdx.json"
       - name: Проверка комплекта релиза
         shell: bash
         env:
@@ -238,7 +255,8 @@ jobs:
                       "release/windows/latest.yml" \
                       "release/linux/RDPManager-${version}.AppImage" \
                       "release/linux/latest-linux.yml" \
-                      "release/server/RDPManager-Server-${version}-linux-x64.tar.gz"; do
+                      "release/server/RDPManager-Server-${version}-linux-x64.tar.gz" \
+                      "release/sbom/RDPManager-${version}-npm-sbom.cdx.json"; do
             [ -s "$file" ] || { echo "::error::Отсутствует или пуст файл $file"; exit 1; }
           done
           grep -Fx "version: $version" release/windows/latest.yml
@@ -254,3 +272,4 @@ jobs:
             release/windows/*
             release/linux/*
             release/server/*
+            release/sbom/*
