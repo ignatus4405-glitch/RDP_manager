@@ -14,7 +14,7 @@ function port() { return new Promise((resolve) => { const srv = net.createServer
 function request(p, target, method = 'GET', body, token) {
   return new Promise((resolve, reject) => {
     const req = https.request({ hostname: '127.0.0.1', port: p, path: target, method, rejectUnauthorized: false, headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) } }, (res) => {
-      let text = ''; res.setEncoding('utf8'); res.on('data', (chunk) => text += chunk); res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(text) }));
+      let text = ''; res.setEncoding('utf8'); res.on('data', (chunk) => text += chunk); res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(text), headers: res.headers }));
     });
     req.on('error', reject); req.end(body ? JSON.stringify(body) : undefined);
   });
@@ -26,9 +26,11 @@ test('server supports TLS and encrypted connection secrets on the HTTPS endpoint
   let ready = false;
   for (let i = 0; i < 60; i++) { try { const response = await request(p, '/api/health'); if (response.status === 200) { ready = true; break; } } catch {} await new Promise((resolve) => setTimeout(resolve, 100)); }
   assert.equal(ready, true);
-  const login = await request(p, '/api/login', 'POST', { username: 'admin', password: 'admin123' }); const token = login.data.token;
+  assert.equal((await request(p, '/api/health')).headers['strict-transport-security'], 'max-age=31536000');
+  const login = await request(p, '/api/login', 'POST', { username: 'admin', password: 'admin123' }); let token = login.data.token;
   assert.equal(login.status, 200);
-  assert.equal((await request(p, '/api/change-password', 'POST', { current_password: 'admin123', new_password: 'newpassword' }, token)).status, 200);
+  const changed = await request(p, '/api/change-password', 'POST', { current_password: 'admin123', new_password: 'newpassword' }, token);
+  assert.equal(changed.status, 200); token = changed.data.token;
   const created = await request(p, '/api/connections', 'POST', { type: 'rdp', name: 'TLS', address: 'example.test' }, token);
   const url = `/api/connections/${created.data.connection.id}/secret`;
   assert.equal((await request(p, url, 'PUT', { password: 'secret over tls' }, token)).status, 200);

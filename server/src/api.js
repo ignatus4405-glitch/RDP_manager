@@ -5,10 +5,15 @@
  * изменение — только администраторам.
  */
 const express = require('express');
-const { db, DATA_DIR, hashPassword, verifyPassword } = require('./db');
+const { db, DATA_DIR } = require('./db');
+const { createPasswordHasher, DUMMY } = require('./password-hasher');
+const passwords = createPasswordHasher();
+const { rdpTickets } = require('./rdp-tickets');
+const { createLoginLimiter } = require('./login-limiter');
+const loginLimiter = createLoginLimiter();
 const { createConnectionSecrets, secureSecretTransport } = require('./connection-secrets');
 const secrets = createConnectionSecrets({ db, dataDir: DATA_DIR });
-const { signToken, requireAuth, requireAdmin } = require('./auth');
+const { signToken, authenticateToken, requireAuth, requireAdmin } = require('./auth');
 
 const router = express.Router();
 
@@ -29,22 +34,42 @@ function publicUser(u) {
   };
 }
 
+// Express 4 does not catch rejected async handlers.
+const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch((err) => {
+  if (err.code === 'PASSWORD_BUSY') return res.status(503).json({ error: 'Сервер занят, повторите попытку позже.' });
+  next(err);
+});
+function currentCaller(req, res, admin = false) {
+  const header = req.headers.authorization || '';
+  const user = authenticateToken(header.startsWith('Bearer ') ? header.slice(7) : null);
+  if (!user) { res.status(401).json({ error: 'Требуется авторизация' }); return false; }
+  if (admin && user.role !== 'admin') { res.status(403).json({ error: 'Доступно только администраторам' }); return false; }
+  return true;
+}
+
 /* ============ Авторизация ============ */
 
-router.post('/login', (req, res) => {
+router.post('/login', asyncRoute(async (req, res) => {
   const username = clean(req.body?.username, 100);
   const password = String(req.body?.password ?? '');
-  if (!username || !password) return res.status(400).json({ error: 'Укажите логин и пароль' });
+  if (!username || !password || password.length > 1024) return res.status(400).json({ error: 'Укажите логин и пароль (не более 1024 символов)' });
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Неверный логин или пароль' });
-  }
-  if (user.disabled) return res.status(403).json({ error: 'Учётная запись отключена. Обратитесь к администратору.' });
-
-  const token = signToken({ sub: user.id, username: user.username, role: user.role });
-  res.json({ token, user: publicUser(user) });
-});
+  const finish = loginLimiter.reserve(req.socket.remoteAddress || 'unknown', username);
+  if (!finish) { res.set('Retry-After', '60'); return res.status(429).json({ error: 'Слишком много попыток входа. Повторите позже.' }); }
+  let success = null;
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const valid = await passwords.verify(password, user?.password_hash || DUMMY);
+    const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    if (!valid || !current || current.disabled || current.password_hash !== user.password_hash || current.token_version !== user.token_version) {
+      success = false;
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
+    }
+    const token = signToken({ sub: current.id, username: current.username, role: current.role, ver: current.token_version });
+    success = true;
+    return res.json({ token, user: publicUser(current) });
+  } finally { finish(success); }
+}));
 
 router.get('/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -52,19 +77,24 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
-router.post('/change-password', requireAuth, (req, res) => {
+router.post('/change-password', requireAuth, asyncRoute(async (req, res) => {
   const current = String(req.body?.current_password ?? '');
   const next = String(req.body?.new_password ?? '');
+  if (current.length > 1024 || next.length > 1024) return res.status(400).json({ error: 'Пароль не должен превышать 1024 символа' });
   if (next.length < 6) return res.status(400).json({ error: 'Новый пароль должен быть не короче 6 символов' });
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!user || !verifyPassword(current, user.password_hash)) {
+  if (!user || !await passwords.verify(current, user.password_hash)) {
     return res.status(400).json({ error: 'Текущий пароль указан неверно' });
   }
-  db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = datetime('now') WHERE id = ?`)
-    .run(hashPassword(next), user.id);
-  res.json({ ok: true });
-});
+  const hash = await passwords.hash(next);
+  if (!currentCaller(req, res)) return;
+  const result = db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1, updated_at = datetime('now') WHERE id = ? AND token_version = ? AND password_hash = ?`)
+    .run(hash, user.id, user.token_version, user.password_hash);
+  if (!result.changes) return res.status(409).json({ error: 'Учётная запись изменилась. Повторите попытку.' });
+  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  res.json({ ok: true, token: signToken({ sub: updated.id, username: updated.username, role: updated.role, ver: updated.token_version }) });
+}));
 
 /* ============ Пользователи (только администраторы) ============ */
 
@@ -73,7 +103,7 @@ router.get('/users', requireAuth, requireAdmin, (req, res) => {
   res.json({ users: users.map(publicUser) });
 });
 
-router.post('/users', requireAuth, requireAdmin, (req, res) => {
+router.post('/users', requireAuth, requireAdmin, asyncRoute(async (req, res) => {
   const username = clean(req.body?.username, 100);
   const full_name = clean(req.body?.full_name, 200);
   const password = String(req.body?.password ?? '');
@@ -82,19 +112,22 @@ router.post('/users', requireAuth, requireAdmin, (req, res) => {
   if (!/^[a-zA-Z0-9_.@-]{3,100}$/.test(username)) {
     return res.status(400).json({ error: 'Логин: минимум 3 символа, латиница/цифры и _ . @ -' });
   }
-  if (password.length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
+  if (password.length < 6 || password.length > 1024) return res.status(400).json({ error: 'Пароль должен содержать от 6 до 1024 символов' });
 
   const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (exists) return res.status(409).json({ error: 'Пользователь с таким логином уже существует' });
 
+  const hash = await passwords.hash(password);
+  if (!currentCaller(req, res, true)) return;
+  if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) return res.status(409).json({ error: 'Пользователь с таким логином уже существует' });
   const info = db.prepare(
     `INSERT INTO users (username, full_name, password_hash, role, must_change_password)
      VALUES (?, ?, ?, ?, 1)`
-  ).run(username, full_name, hashPassword(password), role);
+  ).run(username, full_name, hash, role);
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ user: publicUser(user) });
-});
+}));
 
 router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   const id = Number(req.params.id);
@@ -110,23 +143,26 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Нельзя отключить или понизить свою учётную запись' });
   }
 
-  db.prepare(`UPDATE users SET full_name = ?, role = ?, disabled = ?, updated_at = datetime('now') WHERE id = ?`)
-    .run(full_name, role, disabled, id);
+  db.prepare(`UPDATE users SET full_name = ?, token_version = token_version + CASE WHEN role != ? OR disabled != ? THEN 1 ELSE 0 END, role = ?, disabled = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(full_name, role, disabled, role, disabled, id);
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   res.json({ user: publicUser(updated) });
 });
 
-router.post('/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+router.post('/users/:id/reset-password', requireAuth, requireAdmin, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
   const password = String(req.body?.password ?? '');
-  if (password.length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
+  if (password.length < 6 || password.length > 1024) return res.status(400).json({ error: 'Пароль должен содержать от 6 до 1024 символов' });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-  db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = datetime('now') WHERE id = ?`)
-    .run(hashPassword(password), id);
+  const hash = await passwords.hash(password);
+  if (!currentCaller(req, res, true)) return;
+  const result = db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, token_version = token_version + 1, updated_at = datetime('now') WHERE id = ? AND token_version = ?`)
+    .run(hash, id, user.token_version);
+  if (!result.changes) return res.status(409).json({ error: 'Учётная запись изменилась. Повторите попытку.' });
   res.json({ ok: true });
-});
+}));
 
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   const id = Number(req.params.id);
@@ -135,6 +171,18 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   res.json({ ok: true });
+});
+
+// Ticket is bound to the authenticated user, exact connection and socket peer.
+router.post('/rdp/ticket', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const connectionId = req.body?.connection_id;
+  if (!Number.isSafeInteger(connectionId) || connectionId < 1) return res.status(400).json({ error: 'Некорректное подключение.' });
+  const connection = db.prepare("SELECT id FROM connections WHERE id = ? AND type = 'rdp'").get(connectionId);
+  if (!connection) return res.status(404).json({ error: 'RDP-подключение не найдено.' });
+  const ticket = rdpTickets.issue({ userId: req.user.id, tokenVersion: req.user.tokenVersion, connectionId, ip: req.socket.remoteAddress || '' });
+  if (!ticket) return res.status(503).json({ error: 'Слишком много ожидающих RDP-подключений.' });
+  res.json({ ticket, expires_in: 30 });
 });
 
 /* ============ Подключения ============ */
@@ -147,8 +195,8 @@ router.get('/connections', requireAuth, (req, res) => {
   if (VALID_TYPES.includes(type)) { sql += ' AND type = ?'; params.push(type); }
   if (category && category !== 'all') { sql += ' AND category = ?'; params.push(clean(category, 100)); }
   if (search) {
-    sql += ` AND (name LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')`;
-    const q = `%${likeEscape(clean(search, 200))}%`;
+    sql += ' AND (unicode_contains(name, ?) OR unicode_contains(address, ?) OR unicode_contains(description, ?) OR unicode_contains(tags, ?) OR unicode_contains(username, ?))';
+    const q = clean(search, 200);
     params.push(q, q, q, q, q);
   }
   if (tag) { sql += " AND (',' || tags || ',') LIKE ? ESCAPE '\\'"; params.push(`%,${likeEscape(clean(tag, 100))},%`); }
@@ -195,7 +243,7 @@ router.put('/connections/:id', requireAuth, requireAdmin, (req, res) => {
          tags=@tags, username=@username, description=@description, rustdesk_server=@rustdesk_server, rustdesk_key=@rustdesk_key, domain=@domain, updated_at = datetime('now')
        WHERE id = @id`
     ).run({ ...data.value, id });
-    if (['type', 'address', 'username', 'domain'].some((key) => (existing[key] || '') !== (data.value[key] || ''))) secrets.remove(id);
+    if (['type', 'address', 'port', 'username', 'domain'].some((key) => (existing[key] || '') !== (data.value[key] || ''))) secrets.remove(id);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
   const row = db.prepare('SELECT * FROM connections WHERE id = ?').get(id);
@@ -309,8 +357,8 @@ router.get('/documents', requireAuth, (req, res) => {
   const params = [];
   if (category && category !== 'all') { sql += ' AND category = ?'; params.push(clean(category, 100)); }
   if (search) {
-    sql += " AND (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')";
-    const q = `%${likeEscape(clean(search, 200))}%`;
+    sql += ' AND (unicode_contains(title, ?) OR unicode_contains(content, ?))';
+    const q = clean(search, 200);
     params.push(q, q);
   }
   sql += ' ORDER BY updated_at DESC';

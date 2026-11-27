@@ -12,6 +12,7 @@ const { fileURLToPath, pathToFileURL } = require('node:url');
 const { Blob } = require('node:buffer');
 const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
+const { requireWindowFrame } = require('./ipc-access');
 const { createLocalCredentials } = require('./local-credentials');
 const { createRdpFileWriter } = require('./rdp-file-writer');
 const { createClipboardFileSource } = require('./clipboard-file-source');
@@ -506,30 +507,37 @@ ipcMain.handle('show-error', (_event, message) => {
   const parent = serverManagerWindow || mainWindow;
   return dialog.showMessageBox(parent, { type: 'error', title: 'RDP Manager', message: String(message || 'Ошибка') });
 });
-ipcMain.handle('server-manager-status', () => getServerServiceStatus());
-ipcMain.handle('server-manager-action', async (_event, action) => {
+function requireServerManager(event) {
+  requireWindowFrame(event, serverManagerWindow, path.join(__dirname, 'renderer', 'server-manager.html'));
+}
+ipcMain.handle('server-manager-status', (event) => { requireServerManager(event); return getServerServiceStatus(); });
+ipcMain.handle('server-manager-action', async (event, action) => {
+  requireServerManager(event);
   const status = await runServerServiceAction(action);
   return { ok: true, status, message: action === 'start' ? 'Служба запущена.' : action === 'stop' ? 'Служба остановлена.' : 'Служба перезапущена.' };
 });
-ipcMain.handle('server-manager-logs', () => {
+ipcMain.handle('server-manager-logs', (event) => {
+  requireServerManager(event);
   const logDirectory = path.join(getServerManagerDataDirectory(), 'logs');
   const logFile = path.join(logDirectory, 'server.log');
   return { ...readLogTail(logFile), logFile, logDirectory };
 });
-ipcMain.handle('server-manager-open-log-folder', async () => {
+ipcMain.handle('server-manager-open-log-folder', async (event) => {
+  requireServerManager(event);
   const logDirectory = path.join(getServerManagerDataDirectory(), 'logs');
   fs.mkdirSync(logDirectory, { recursive: true });
   const error = await shell.openPath(logDirectory);
   if (error) throw new Error(error);
   return { ok: true };
 });
-ipcMain.handle('server-manager-open-panel', () => openServerPanel());
-ipcMain.handle('server-manager-update-check', async () => {
+ipcMain.handle('server-manager-open-panel', (event) => { requireServerManager(event); return openServerPanel(); });
+ipcMain.handle('server-manager-update-check', async (event) => {
+  requireServerManager(event);
   const result = await checkServerManagerUpdates();
   sendServerManagerUpdate(result);
   return result;
 });
-ipcMain.handle('server-manager-open-release', (_event, url) => openServerRelease(url));
+ipcMain.handle('server-manager-open-release', (event, url) => { requireServerManager(event); return openServerRelease(url); });
 
 app.whenReady().then(() => {
   if (!hasServerManagerLock) return;

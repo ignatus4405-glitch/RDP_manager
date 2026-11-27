@@ -12,7 +12,7 @@
  * https://github.com/electerm/ironrdp-wasm, example/lib/rdp-proxy.js)
  * с добавленной аутентификацией и ограничением целей:
  *
- *  - WebSocket доступен только с валидным JWT (?token=...), как и остальной API;
+ *  - WebSocket доступен только с одноразовым тикетом, выданным авторизованному пользователю, как и остальной API;
  *  - destination из RDCleanPath-запроса обязан совпадать (host:port) с RDP-подключением
  *    из базы данных — шлюз не является открытым релеем на произвольные хосты.
  *
@@ -23,7 +23,7 @@ const tls = require('tls');
 const net = require('net');
 const { WebSocketServer } = require('ws');
 const { db } = require('./db');
-const { verifyToken } = require('./auth');
+const { rdpTickets } = require('./rdp-tickets');
 
 // ── RDCleanPath ASN.1 DER Constants ──
 const VERSION_1 = 3390; // 3389 + 1
@@ -311,7 +311,10 @@ function setupRelay(ws, tlsSocket, logPrefix) {
 }
 
 function handleConnection(ws) {
+  const firstMessageTimeout = setTimeout(() => ws.terminate(), 10000);
+  ws.once('close', () => clearTimeout(firstMessageTimeout));
   ws.once('message', async (data) => {
+    clearTimeout(firstMessageTimeout);
     const requestData = Buffer.isBuffer(data) ? data : Buffer.from(data);
     let host = '?'; let port = 0;
     try {
@@ -320,7 +323,15 @@ function handleConnection(ws) {
       const logPrefix = `[rdp ${host}:${port}]`;
 
       // Allowlist по базе подключений — шлюз не ходит к произвольным хостам
-      if (!isKnownRdpTarget(host, port)) {
+      const currentUser = db.prepare('SELECT disabled, token_version FROM users WHERE id = ?').get(ws.user.id);
+      if (!currentUser || currentUser.disabled || currentUser.token_version !== ws.user.token_version) {
+        ws.send(buildRDCleanPathError(1, 403)); ws.close(); return;
+      }
+      const row = db.prepare("SELECT address, port FROM connections WHERE id = ? AND type = 'rdp'").get(ws.connectionId);
+      // Check the specific selected record again, not just any allowed RDP target.
+      let expectedHost = row?.address, expectedPort = row?.port || 3389;
+      if (expectedHost?.includes(':')) { const parsed = parseDestination(expectedHost); expectedHost = parsed.host; expectedPort = parsed.port; }
+      if (!row || normalizeHost(expectedHost) !== normalizeHost(host) || Number(expectedPort) !== Number(port)) {
         console.warn(`${logPrefix} отказ: цель не найдена среди RDP-подключений БД`);
         ws.send(buildRDCleanPathError(1, 403));
         ws.close();
@@ -343,20 +354,20 @@ function handleConnection(ws) {
 }
 
 /**
- * Подключает RDP-шлюз к HTTP-серверу (upgrade на /ws/rdp?token=<JWT>).
+ * Подключает RDP-шлюз к HTTP-серверу (upgrade на /ws/rdp?ticket=<одноразовый тикет>).
  * Вызывать ПОСЛЕ создания http.Server и ДО server.listen().
  */
 function attachRdpGateway(server, { path: wsPath = '/ws/rdp' } = {}) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 100 * 1024 * 1024, perMessageDeflate: false });
 
   server.on('upgrade', (req, socket, head) => {
     let url;
     try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
     if (url.pathname !== wsPath) return; // не наш эндпоинт — отдаём другим обработчикам
 
-    const token = url.searchParams.get('token');
-    const payload = verifyToken(token);
-    if (!payload) {
+    const ticket = rdpTickets.consume(url.searchParams.get('ticket'), req.socket.remoteAddress || '');
+    const user = ticket && db.prepare('SELECT id, username, role, disabled, token_version FROM users WHERE id = ?').get(ticket.userId);
+    if (!user || user.disabled || user.token_version !== ticket.tokenVersion) {
       console.warn('[rdp] отказ в upgrade: невалидный или отсутствующий токен');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
@@ -364,7 +375,8 @@ function attachRdpGateway(server, { path: wsPath = '/ws/rdp' } = {}) {
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.user = { id: payload.sub, username: payload.username, role: payload.role };
+      ws.user = user;
+      ws.connectionId = ticket.connectionId;
       handleConnection(ws);
     });
   });

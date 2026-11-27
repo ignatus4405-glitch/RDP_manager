@@ -1,0 +1,35 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdp-auth-migration-'));
+process.env.RDP_MANAGER_DATA = dir;
+process.env.RDP_MANAGER_SECRET = 'auth-test-secret';
+const old = new DatabaseSync(path.join(dir, 'rdp-manager.db'));
+old.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL DEFAULT '', password_hash TEXT NOT NULL, role TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+INSERT INTO users (username, password_hash, role) VALUES ('user', 'dummy', 'employee');`);
+old.close();
+const { db } = require('../src/db');
+const { authenticateToken, signToken } = require('../src/auth');
+
+test('migration, fresh roles and token revocation fail closed', (t) => {
+  t.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  assert.equal(db.prepare('PRAGMA busy_timeout').get().timeout, 5000);
+  assert.equal(db.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
+  assert.equal(db.prepare('SELECT token_version FROM users WHERE id = 1').get().token_version, 0);
+  assert.equal(authenticateToken(signToken({ sub: 1, role: 'admin' })), null);
+  const token = signToken({ sub: 1, username: 'forged', role: 'admin', ver: 0 });
+  assert.equal(authenticateToken(token).role, 'employee');
+  assert.equal(authenticateToken(token).username, 'user');
+  db.prepare('UPDATE users SET disabled = 1 WHERE id = 1').run();
+  assert.equal(authenticateToken(token), null);
+  db.prepare('UPDATE users SET disabled = 0, token_version = token_version + 1 WHERE id = 1').run();
+  assert.equal(authenticateToken(token), null);
+  const fresh = signToken({ sub: 1, ver: 1 });
+  assert.equal(authenticateToken(fresh).role, 'employee');
+  db.prepare('DELETE FROM users WHERE id = 1').run();
+  assert.equal(authenticateToken(fresh), null);
+});

@@ -299,9 +299,8 @@ const rdpConnAddress = (conn) =>
 // Чистый базовый URL (для логов и сообщений — без токена)
 const rdpGatewayBase = () => `${state.serverUrl.replace(/^http(s?)/, 'ws$1')}/ws/rdp`;
 
-// Фактический URL для WebSocket: шлюз аутентифицирует upgrade по ?token=<JWT>
-const rdpGatewayUrl = () =>
-  state.token ? `${rdpGatewayBase()}?token=${encodeURIComponent(state.token)}` : rdpGatewayBase();
+// The access token must never appear in a WebSocket URL.
+const rdpGatewayUrl = (ticket) => `${rdpGatewayBase()}?ticket=${encodeURIComponent(ticket)}`;
 
 /** Простейшее сравнение версий '1.3.0' < '1.4.0' → true */
 function rdpSemverLt(a, b) {
@@ -832,7 +831,6 @@ async function startEmbeddedRdp() {
     if (credentials.domain) builder.serverDomain(credentials.domain);
     builder.password(password);
     builder.destination(destination);
-    builder.proxyAddress(rdpGatewayUrl());
     builder.authToken('none');
     builder.desktopSize(new IronRDP.DesktopSize(width, height));
     builder.renderCanvas(canvas);
@@ -915,6 +913,10 @@ async function startEmbeddedRdp() {
     $('rdpScreenHint').classList.remove('hidden');
     $('rdpScreenHint').textContent = `Подключение к ${destination}…`;
 
+    // Fetch immediately before connecting, so initialization does not consume its TTL.
+    const ticket = await api('/rdp/ticket', { method: 'POST', body: { connection_id: conn.id }, noStore: true });
+    if (!isCurrentAttempt()) return;
+    builder.proxyAddress(rdpGatewayUrl(ticket.ticket));
     const session = await builder.connect();
     if (!isCurrentAttempt()) { try { session.shutdown(); } catch { /* already closed */ } return; }
     rdpSession.session = session;
@@ -1399,7 +1401,8 @@ $('btnChangePassword').addEventListener('click', async () => {
   if (next.length < 6) return toast('Новый пароль — минимум 6 символов', true);
   if (next !== next2) return toast('Пароли не совпадают', true);
   try {
-    await api('/change-password', { method: 'POST', body: { current_password: cur, new_password: next } });
+    const result = await api('/change-password', { method: 'POST', body: { current_password: cur, new_password: next } });
+    if (result.token) { state.token = result.token; sessionStorage.setItem('rdp_token', result.token); }
     $('curPassword').value = ''; $('newPassword').value = ''; $('newPassword2').value = '';
     if (state.user) { state.user.must_change_password = false; $('mustChangeBanner').classList.add('hidden'); }
     toast('Пароль изменён');
