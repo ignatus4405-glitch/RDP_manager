@@ -24,6 +24,7 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "electron": "45.3.3",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
@@ -34,6 +35,7 @@
     "productName": "RDP Manager",
     "files": [
       "main.js",
+      "ipc-access.js",
       "local-credentials.js",
       "ssh-session.js",
       "sftp-editor.js",

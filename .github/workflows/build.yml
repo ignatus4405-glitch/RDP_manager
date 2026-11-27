@@ -96,6 +96,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Проверка модулей в собранном app.asar
+        shell: bash
+        run: |
+          ASAR=$(find client/dist -name app.asar -path '*resources*' | head -n 1)
+          if [ -z "$ASAR" ]; then
+            echo "::error::app.asar не найден"
+            exit 1
+          fi
+          node client/scripts/check-asar.js "$ASAR"
+
       - name: Проверка app-update.yml (конфиг автообновления внутри сборки)
         shell: bash
         run: |
