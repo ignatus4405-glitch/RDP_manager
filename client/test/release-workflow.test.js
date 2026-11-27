@@ -16,7 +16,7 @@ test('tag release is published by one job after all build artifacts are checked'
   for (const name of ['installers-windows-latest', 'installers-ubuntu-latest', 'server-installers-linux']) {
     assert.ok(publish.includes(`name: ${name}`));
   }
-  for (const file of ['.exe.blockmap', 'latest.yml', '.AppImage', 'latest-linux.yml', '-linux-x64.tar.gz']) {
+  for (const file of ['.exe.blockmap', 'latest.yml', '.AppImage', 'latest-linux.yml', '-linux-x64.tar.gz', '-npm-sbom.cdx.json']) {
     assert.ok(publish.includes(file));
   }
   assert.match(publish, /fail_on_unmatched_files: true/);

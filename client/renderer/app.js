@@ -168,6 +168,22 @@ document.querySelectorAll('.nav-item[data-view]').forEach((btn) => {
   });
 });
 
+// Горячая клавиша работает только в рабочем пространстве менеджера. Не
+// перехватываем ввод в сессиях, модальных окнах и редактируемых полях.
+function handleConnectionSearchShortcut(event) {
+  if (event.defaultPrevented || event.isComposing || event.repeat || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.code !== 'KeyK') return;
+  if ($('appView').classList.contains('hidden') || !$('loginView').classList.contains('hidden') || !$('requiredPasswordView').classList.contains('hidden')) return;
+  if (['modalBackdrop', 'rdpOverlay', 'rustdeskOverlay', 'sshOverlay', 'webOverlay'].some((id) => !$(id).classList.contains('hidden')) || document.querySelector('dialog[open]')) return;
+  const target = event.target;
+  if (target !== $('connSearch') && (target?.isContentEditable || target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))) return;
+  const navigation = document.querySelector('.nav-item[data-view="connectionsView"]');
+  if (!navigation) return;
+  event.preventDefault();
+  navigation.click();
+  $('connSearch').focus();
+}
+document.addEventListener('keydown', handleConnectionSearchShortcut);
+
 function applyRoleVisibility() {
   document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !isAdmin()));
 }
