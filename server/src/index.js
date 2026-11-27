@@ -13,6 +13,7 @@ const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const { installConsoleFileLogger } = require('./file-logger');
+const { safeRequestPath } = require('./request-log');
 try { installConsoleFileLogger(); }
 catch (error) { console.warn('Не удалось открыть файл журнала сервера:', error.message); }
 const express = require('express');
@@ -27,13 +28,22 @@ const HOST = process.env.RDP_MANAGER_HOST || '0.0.0.0';
 
 const app = express();
 app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // Never trust forwarded headers without an explicit trusted proxy configuration.
+  if (req.socket.encrypted) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  next();
+});
 app.use(express.json({ limit: '2mb' }));
 
 // Простой лог запросов
 app.use('/api', (req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
-    console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl} → ${res.statusCode} (${Date.now() - start}ms)`);
+    console.log(`${new Date().toISOString()} ${req.method} ${safeRequestPath(req.originalUrl)} → ${res.statusCode} (${Date.now() - start}ms)`);
   });
   next();
 });

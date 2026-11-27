@@ -3,7 +3,7 @@
  * Лёгкая JWT-совместимая авторизация на HMAC-SHA256 (без внешних зависимостей).
  */
 const crypto = require('crypto');
-const { getTokenSecret } = require('./db');
+const { db, getTokenSecret } = require('./db');
 
 const TOKEN_TTL_SECONDS = Number(process.env.RDP_MANAGER_TOKEN_TTL || 12 * 60 * 60); // 12 часов
 
@@ -35,13 +35,22 @@ function verifyToken(token) {
   }
 }
 
-/** Middleware: требует валидный токен, кладёт req.user = {id, username, role} */
+// Resolve identity and privileges from the database for every new request.
+function authenticateToken(token) {
+  const payload = verifyToken(token);
+  if (!payload || !Number.isSafeInteger(payload.sub) || !Number.isSafeInteger(payload.ver)) return null;
+  const user = db.prepare('SELECT id, username, role, disabled, must_change_password, token_version FROM users WHERE id = ?').get(payload.sub);
+  if (!user || user.disabled || user.token_version !== payload.ver) return null;
+  return { id: user.id, username: user.username, role: user.role, tokenVersion: user.token_version, must_change_password: !!user.must_change_password };
+}
+
+/** Middleware: требует действующую учётную запись и актуальный токен */
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const payload = verifyToken(token);
-  if (!payload) return res.status(401).json({ error: 'Требуется авторизация' });
-  req.user = { id: payload.sub, username: payload.username, role: payload.role };
+  const user = authenticateToken(token);
+  if (!user) return res.status(401).json({ error: 'Требуется авторизация' });
+  req.user = user;
   next();
 }
 
@@ -53,4 +62,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { signToken, verifyToken, requireAuth, requireAdmin, TOKEN_TTL_SECONDS };
+module.exports = { signToken, verifyToken, authenticateToken, requireAuth, requireAdmin, TOKEN_TTL_SECONDS };

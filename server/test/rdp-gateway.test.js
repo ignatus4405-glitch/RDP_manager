@@ -29,6 +29,8 @@ const {
 } = require('../src/rdp-gateway');
 const { db } = require('../src/db');
 const { signToken } = require('../src/auth');
+const { rdpTickets } = require('../src/rdp-tickets');
+const { WebSocket } = require('ws');
 
 before(() => {
   db.prepare(
@@ -115,7 +117,7 @@ test('RDCleanPath: ответ и ошибка имеют форму SEQUENCE с 
   assert.ok(err.length > 10);
 });
 
-test('WebSocket upgrade без токена → 401; с токеном → 101', async () => {
+test('WebSocket принимает только одноразовый тикет с доступом к выбранной цели', async () => {
   const server = http.createServer((req, res) => { res.statusCode = 404; res.end('not found'); });
   attachRdpGateway(server, { path: '/ws/rdp' });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -139,9 +141,28 @@ test('WebSocket upgrade без токена → 401; с токеном → 101',
   const denied = await rawUpgrade('?token=bad-token');
   assert.match(denied, /^HTTP\/1\.1 401/);
 
-  const token = signToken({ sub: 1, username: 'admin', role: 'admin' });
-  const allowed = await rawUpgrade(`?token=${encodeURIComponent(token)}`);
-  assert.match(allowed, /^HTTP\/1\.1 101/);
+  const token = signToken({ sub: 1, username: 'admin', role: 'admin', ver: 0 });
+  assert.match(await rawUpgrade(`?token=${encodeURIComponent(token)}`), /^HTTP\/1\.1 401/);
+  const issue = () => rdpTickets.issue({ userId: 1, tokenVersion: 0, connectionId: 1, ip: '127.0.0.1' });
+  const ticket = issue();
+  assert.match(await rawUpgrade(`?ticket=${ticket}`), /^HTTP\/1\.1 101/);
+  assert.match(await rawUpgrade(`?ticket=${ticket}`), /^HTTP\/1\.1 401/);
+  const deniedTicket = issue();
+  db.prepare('UPDATE users SET disabled = 1, token_version = token_version + 1 WHERE id = 1').run();
+  assert.match(await rawUpgrade(`?ticket=${deniedTicket}`), /^HTTP\/1\.1 401/);
+  db.prepare('UPDATE users SET disabled = 0 WHERE id = 1').run();
+  assert.match(await rawUpgrade(`?ticket=${issue()}`), /^HTTP\/1\.1 401/);
+  db.prepare('UPDATE users SET token_version = 0 WHERE id = 1').run();
+
+  const mismatch = issue();
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/rdp?ticket=${mismatch}`);
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+  const request = tlv(0x30, Buffer.concat([
+    tlv(0xa0, derInt(3390)), tlv(0xa2, tlv(0x0c, Buffer.from('192.168.55.11:3390'))), tlv(0xa6, tlv(0x04, Buffer.from([0xe0, 0, 0, 0, 0, 0]))),
+  ]));
+  const result = new Promise((resolve) => ws.once('message', resolve)); ws.send(request);
+  assert.deepEqual(await result, buildRDCleanPathError(1, 403));
+  ws.terminate();
 
   // Закрываем все оставшиеся сокеты (в т.ч. апгрейднутые), иначе server.close() зависает
   server.closeAllConnections?.();

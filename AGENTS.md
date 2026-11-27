@@ -33,7 +33,7 @@ server/src/file-logger.js — файловый `server.log` с ротацией 
 server/src/api.js     — все маршруты /api: login, change-password, users CRUD, connections CRUD + /meta, documents CRUD, stats
 server/src/db.js      — схема SQLite, seed admin, scrypt hash/verify, секрет токенов (data/secret.key)
 server/src/auth.js    — HMAC-JWT (sign/verify), requireAuth, requireAdmin (12 ч TTL, env RDP_MANAGER_TOKEN_TTL)
-server/src/rdp-gateway.js — RDCleanPath-шлюз: WS `/ws/rdp` → TCP/TLS → RDP; JWT (?token=) + allowlist целей по таблице connections (type='rdp'); ASN.1 DER, адаптировано из electerm/ironrdp-wasm (MIT)
+server/src/rdp-gateway.js — RDCleanPath-шлюз: WS `/ws/rdp` → TCP/TLS → RDP; одноразовый тикет + проверка выбранной RDP-карточки; ASN.1 DER, адаптировано из electerm/ironrdp-wasm (MIT)
 server/web/index.html — веб-панель администратора (vanilla JS, те же /api/*)
 server/test/          — смоук + unit-тесты (smoke.test.js, rdp-gateway.test.js)
 server/src/paths.js   — «домашний» каталог приложения (env → web/ рядом с exe (SEA) → dev из репозитория)
@@ -65,7 +65,7 @@ release-please-config.json / .release-please-manifest.json — конфигур�
 ## Встроенный RDP (как в RDM) — как устроено
 - Клиент рендерит RDP на `<canvas>` через **IronRDP WASM** (`client/renderer/vendor/ironrdp/bundle.js`, собирается esbuild'ом из `renderer/ironrdp-entry.mjs`; WASM декодируется из data:URL в байты и передаётся в `WebAssembly.instantiate` напрямую — НИКАКОГО `fetch(data:)`: `connect-src` его блокирует).
 - Между WASM и RDP-узлом — **RDCleanPath** (ASN.1 DER поверх WebSocket). Шлюз на сервере: `server/src/rdp-gateway.js` (`/ws/rdp`, зависимость `ws`), адаптирован из electerm/ironrdp-wasm (MIT) + аутентификация и allowlist.
-- Аутентификация шлюза: `?token=<JWT>` из `sessionStorage`; цели сверяются с таблицей `connections` (`type='rdp'`, host case-insensitive, порт по умолчанию 3389) — open relay исключён. Пароль RDP через шлюз не логируется (CredSSP выполняет WASM-клиент).
+- Аутентификация шлюза: одноразовый тикет из `POST /api/rdp/ticket` привязан к пользователю, выбранной карточке и IP; цели сверяются с соответствующей RDP-карточкой (host case-insensitive, порт по умолчанию 3389). Старый клиент и сервер с новыми тикетами несовместимы; для работы через балансировщик HTTP и WS должны попадать на один сервер с одинаковым видимым IP. Пароль RDP через шлюз не логируется (CredSSP выполняет WASM-клиент).
 - Рендерер: полноэкранный `#rdpOverlay`, форма (username из карточки + пароль каждый раз), `desktopSize` по доступному пространству `.rdp-body` (чётные, до 4096×2160; расширение `display_control` + живой `session.resize()` при изменении окна через 250 мс debounce), ввод — PS/2-сканкоды (раскладка не влияет), буфер обмена — текст, двусторонний: remote→local через `remoteClipboardChangedCallback` → `clipboard.writeText` главного процесса (IPC `clipboard-read`/`clipboard-write` в `client/main.js` + `readClipboard`/`writeClipboard` в preload), local→remote — поллинг системного буфера раз в 800 мс во время сессии (API `navigator.clipboard` в renderer ненадёжен без жестов/разрешений), `Esc` уходит в сессию (закрыть окно можно с формы).
 - Сборка: `npm run build:ironrdp --workspace client` (входит в `npm run dist`; CI собирать ничего отдельно не нужно). Unit-тесты шлюза: `server/test/rdp-gateway.test.js`.
 - Ограничения: экзотика (RD Gateway, RemoteFX, smartcard, редиректы дисков) не поддерживается — для таких узлов есть кнопка «Во внешнем клиенте». Графическую часть проверяйте на реальной машине: в sandbox GUI нет.

@@ -15,8 +15,11 @@ const DATA_DIR = process.env.RDP_MANAGER_DATA
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'rdp-manager.db'));
+db.exec('PRAGMA busy_timeout = 5000;');
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
+// SQLite's built-in LIKE only case-folds ASCII.
+db.function('unicode_contains', { deterministic: true }, (value, query) => String(value ?? '').normalize('NFC').toLowerCase().includes(String(query ?? '').normalize('NFC').toLowerCase()) ? 1 : 0);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -27,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
   role                TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('admin', 'employee')),
   must_change_password INTEGER NOT NULL DEFAULT 0,
   disabled            INTEGER NOT NULL DEFAULT 0,
+  token_version       INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -66,6 +70,10 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
 `);
+
+// Existing tokens without a version are rejected after this migration.
+const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+if (!userColumns.has('token_version')) db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
 
 // Existing databases predate per-connection RustDesk configuration.
 const connectionColumns = new Set(db.prepare('PRAGMA table_info(connections)').all().map((column) => column.name));

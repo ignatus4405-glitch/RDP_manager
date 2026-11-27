@@ -81,19 +81,41 @@ test('server smoke: health → login → CRUD → защита доступа', 
     });
   const get = (url, token) => fetch(base + url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
 
+  const headers = await get('/api/health');
+  assert.equal(headers.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(headers.headers.get('x-frame-options'), 'DENY');
+  assert.equal(headers.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(headers.headers.get('strict-transport-security'), null);
+  assert.equal(headers.headers.get('x-powered-by'), null);
+
+  // Concurrent scrypt checks must not block the server event loop.
+  const logins = Array.from({ length: 20 }, (_, i) => post('/api/login', { username: 'absent' + i, password: 'wrong' }));
+  const start = Date.now();
+  assert.equal((await get('/api/health')).status, 200);
+  assert.ok(Date.now() - start < 1500, 'health should remain responsive during login checks');
+  const failures = await Promise.all(logins);
+  assert.ok(failures.every((r) => r.status === 401));
+
+  for (let i = 0; i < 5; i++) assert.equal((await post('/api/login', { username: 'unknown-rate-test', password: 'wrong' })).status, 401);
+  assert.equal((await post('/api/login', { username: 'unknown-rate-test', password: 'wrong' })).status, 429);
+
   // 1. Логин администратора по умолчанию
   const badLogin = await post('/api/login', { username: 'admin', password: 'wrong-password' });
   assert.equal(badLogin.status, 401);
 
   const login = await post('/api/login', { username: 'admin', password: 'admin123' });
   assert.equal(login.status, 200);
-  const { token, user } = await login.json();
+  let { token, user } = await login.json();
   assert.equal(user.role, 'admin');
   assert.equal(user.must_change_password, true);
   // Default admin must change their initial password before using stored secrets.
   const lockedSecret = await fetch(base + '/api/connections/1/secret', { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(lockedSecret.status, 403);
-  assert.equal((await post('/api/change-password', { current_password: 'admin123', new_password: 'admin456' }, token)).status, 200);
+  const initialToken = token;
+  const passwordChanged = await post('/api/change-password', { current_password: 'admin123', new_password: 'admin456' }, token);
+  assert.equal(passwordChanged.status, 200);
+  token = (await passwordChanged.json()).token;
+  assert.equal((await get('/api/me', initialToken)).status, 401);
 
   // 2. Создание подключения (типизация/валидация)
   const badConn = await post('/api/connections', { type: 'vnc', name: 'x', address: 'y' }, token);
@@ -102,6 +124,12 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const created = await post('/api/connections', { type: 'rdp', name: 'Тест', address: '192.0.2.10', tags: ' a , b ' }, token);
   assert.equal(created.status, 201);
   const { connection } = await created.json();
+  const ticketResponse = await post('/api/rdp/ticket', { connection_id: connection.id }, token);
+  assert.equal(ticketResponse.status, 200);
+  assert.equal(ticketResponse.headers.get('cache-control'), 'no-store');
+  assert.match((await ticketResponse.json()).ticket, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal((await post('/api/rdp/ticket', { connection_id: 999999 }, token)).status, 404);
+  assert.equal((await post('/api/rdp/ticket', { connection_id: connection.id })).status, 401);
   assert.equal(connection.port, 3389);
   assert.equal(connection.tags, 'a,b');
   assert.equal(connection.domain, '');
@@ -155,7 +183,11 @@ test('server smoke: health → login → CRUD → защита доступа', 
   assert.equal(connections.length, 1);
 
   // 4. Документы
+  const searchCyrillic = await get('/api/connections?search=' + encodeURIComponent('тЕст'), token);
+  assert.ok((await searchCyrillic.json()).connections.some((c) => c.id === connection.id));
   const doc = await post('/api/documents', { title: 'Инструкция', content: '# Привет' }, token);
+  const searchDoc = await get('/api/documents?search=' + encodeURIComponent('пРИВЕТ'), token);
+  assert.ok((await searchDoc.json()).documents.some((d) => d.title === 'Инструкция'));
   assert.equal(doc.status, 201);
 
   // 5. Создание сотрудника и проверка прав
@@ -175,6 +207,18 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const empRead = await get('/api/connections', empToken);
   assert.equal(empRead.status, 200, 'сотрудник должен видеть подключения');
 
+  const another = await post('/api/users', { username: 'otheradmin', password: 'secret3', role: 'admin' }, token);
+  const otherId = (await another.json()).user.id;
+  const otherToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret3' })).json()).token;
+  assert.equal((await get('/api/users', otherToken)).status, 200);
+  const demote = await fetch(base + '/api/users/' + otherId, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ role: 'employee' }) });
+  assert.equal(demote.status, 200);
+  assert.equal((await get('/api/users', otherToken)).status, 401);
+  const demotedToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret3' })).json()).token;
+  assert.equal((await get('/api/users', demotedToken)).status, 403);
+  assert.equal((await post('/api/users/' + otherId + '/reset-password', { password: 'secret4' }, token)).status, 200);
+  assert.equal((await get('/api/me', demotedToken)).status, 401);
+
   // 6. Неверный текущий пароль не должен выглядеть как истёкшая сессия.
   const badChange = await post('/api/change-password', { current_password: 'wrong', new_password: 'secret2' }, empToken);
   assert.equal(badChange.status, 400);
@@ -191,11 +235,17 @@ test('server smoke: health → login → CRUD → защита доступа', 
   assert.equal((await employeeSecret.json()).password, ' SSH $пароль ');
   const disable = await fetch(base + '/api/users/' + (await emp.json()).user.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ disabled: true }) });
   assert.equal(disable.status, 200);
-  assert.equal((await get('/api/connections/' + rdConnection.id + '/secret', employeeToken)).status, 403);
+  assert.equal((await get('/api/connections/' + rdConnection.id + '/secret', employeeToken)).status, 401);
+  assert.equal((await get('/api/connections', employeeToken)).status, 401);
   const deletedSecret = await fetch(secretUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
   assert.equal(deletedSecret.status, 200);
   assert.equal((await (await get('/api/connections/' + rdConnection.id + '/secret', token)).json()).password, null);
   assert.equal((await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ password: 'old-service' }) })).status, 200);
+  const rdpSecretUrl = base + '/api/connections/' + connection.id + '/secret';
+  assert.equal((await fetch(rdpSecretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ password: 'port-secret' }) })).status, 200);
+  const changedPort = await fetch(base + '/api/connections/' + connection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ port: 3391 }) });
+  assert.equal(changedPort.status, 200);
+  assert.equal((await (await get('/api/connections/' + connection.id + '/secret', token)).json()).password, null, 'changing port must not reuse its password');
   const changedAddress = await fetch(base + '/api/connections/' + rdConnection.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ address: 'different' }) });
   assert.equal(changedAddress.status, 200);
   assert.equal((await (await get('/api/connections/' + rdConnection.id + '/secret', token)).json()).password, null, 'changing target must not reuse its password');
