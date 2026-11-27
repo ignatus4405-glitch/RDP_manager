@@ -51,6 +51,8 @@ function requireAuth(req, res, next) {
   const user = authenticateToken(token);
   if (!user) return res.status(401).json({ error: 'Требуется авторизация' });
   req.user = user;
+  const allowed = (req.method === 'GET' && req.path === '/me') || (req.method === 'POST' && req.path === '/change-password');
+  if (user.must_change_password && !allowed) return res.status(403).json({ error: 'Перед продолжением необходимо сменить пароль.', code: 'PASSWORD_CHANGE_REQUIRED' });
   next();
 }
 

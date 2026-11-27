@@ -1,6 +1,8 @@
 'use strict';
 
 const fs = require('fs');
+const net = require('node:net');
+const { DOMParser } = require('@xmldom/xmldom');
 
 const SERVICE_STATE_NAMES = Object.freeze({
   1: 'stopped',
@@ -67,6 +69,45 @@ function readLogTail(filePath, { maxBytes = 512 * 1024, maxLines = 1200 } = {}) 
   }
 }
 
+// WinSW configuration is trusted local configuration, but it must not be
+// interpreted as an arbitrary URL. Never open a guessed HTTP address when the
+// XML is malformed or a TLS setting is ambiguous.
+function serverPanelUrl(xml, inherited = {}) {
+  if (typeof xml !== 'string' || Buffer.byteLength(xml) > 1024 * 1024 || /<!DOCTYPE/i.test(xml)) throw new Error('Некорректная конфигурация службы.');
+  const errors = [];
+  const doc = new DOMParser({ errorHandler: { warning: (e) => errors.push(e), error: (e) => errors.push(e), fatalError: (e) => errors.push(e) } }).parseFromString(xml, 'application/xml');
+  if (errors.length || doc.documentElement?.tagName !== 'service') throw new Error('Не удалось прочитать конфигурацию службы.');
+  const vars = {};
+  for (const [key, value] of Object.entries(inherited)) if (typeof value === 'string') vars[key.toUpperCase()] = value;
+  const configured = new Set();
+  for (let node = doc.documentElement.firstChild; node; node = node.nextSibling) {
+    if (node.nodeType !== 1 || node.tagName !== 'env') continue;
+    const name = node.getAttribute('name').toUpperCase();
+    if (!['RDP_MANAGER_HOST', 'RDP_MANAGER_PORT', 'RDP_MANAGER_TLS_CERT', 'RDP_MANAGER_TLS_KEY'].includes(name)) continue;
+    if (configured.has(name) || !node.hasAttribute('value')) throw new Error('Неоднозначные настройки службы.');
+    configured.add(name);
+    const raw = node.getAttribute('value');
+    vars[name] = raw.replace(/%([^%]+)%/g, (_match, variable) => {
+      const value = vars[variable.toUpperCase()];
+      if (value === undefined) throw new Error(`Не удалось определить переменную ${variable} в настройках службы.`);
+      return value;
+    });
+    if (/%[^%]+%/.test(vars[name])) throw new Error('Переменная в настройках службы не разрешена.');
+  }
+  let host = vars.RDP_MANAGER_HOST || '0.0.0.0';
+  const portText = vars.RDP_MANAGER_PORT || '8720';
+  if (!/^\d{1,5}$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535) throw new Error('Некорректный порт в настройках службы.');
+  const cert = vars.RDP_MANAGER_TLS_CERT || '', key = vars.RDP_MANAGER_TLS_KEY || '';
+  if (Boolean(cert) !== Boolean(key)) throw new Error('Для HTTPS в настройках службы нужны сертификат и ключ.');
+  if (host === '0.0.0.0') host = '127.0.0.1';
+  if (host === '::' || host === '[::]') host = '::1';
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  const ipVersion = net.isIP(host);
+  if (!ipVersion && !/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*\.?$/.test(host)) throw new Error('Некорректный адрес в настройках службы.');
+  const authority = ipVersion === 6 ? `[${host}]` : host;
+  return `${cert ? 'https' : 'http'}://${authority}:${Number(portText)}/`;
+}
+
 function compareVersions(left, right) {
   const parse = (version) => String(version || '').replace(/^v/i, '').split(/[.+-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
   const a = parse(left);
@@ -78,4 +119,4 @@ function compareVersions(left, right) {
   return 0;
 }
 
-module.exports = { SERVICE_STATE_NAMES, compareVersions, parseServiceStatus, readLogTail };
+module.exports = { SERVICE_STATE_NAMES, compareVersions, parseServiceStatus, readLogTail, serverPanelUrl };

@@ -43,7 +43,7 @@
   .badge.admin { background: #3b82f633; color: #93c5fd; border: 1px solid #3b82f655; }
   .badge.employee { background: #22c55e22; color: #86efac; border: 1px solid #22c55e44; }
   .badge.off { background: #ef444422; color: #fca5a5; border: 1px solid #ef444455; }
-  #loginView { max-width: 420px; margin: 8vh auto 0; }
+  #loginView, #requiredPasswordView { max-width: 420px; margin: 8vh auto 0; }
   #appView { display: none; }
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
   .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent); padding: 10px 20px; border-radius: 10px; font-size: 13.5px; display: none; z-index: 50; max-width: 90vw; }
@@ -68,6 +68,19 @@
     <button id="btnLogin" style="flex:1">Войти</button>
   </div>
   <p class="muted" style="margin-top:12px">По умолчанию: <code>admin</code> / <code>admin123</code> — смените пароль после первого входа.</p>
+</div>
+
+<div id="requiredPasswordView" class="login card" style="display:none">
+  <h1>Смена пароля</h1>
+  <p class="muted">Перед продолжением необходимо сменить начальный или сброшенный пароль.</p>
+  <form id="requiredPasswordForm">
+    <label for="requiredCurrent">Текущий пароль</label><input id="requiredCurrent" type="password" autocomplete="current-password" required />
+    <label for="requiredNew">Новый пароль</label><input id="requiredNew" type="password" autocomplete="new-password" minlength="6" required />
+    <label for="requiredConfirm">Повторите новый пароль</label><input id="requiredConfirm" type="password" autocomplete="new-password" minlength="6" required />
+    <p id="requiredError" role="alert"></p>
+    <button id="requiredSubmit" type="submit">Сменить пароль</button>
+    <button id="requiredLogout" class="ghost" type="button">Выйти</button>
+  </form>
 </div>
 
 <!-- Приложение -->
@@ -152,14 +165,38 @@ async function login() {
 
 function logout() {
   token = null; sessionStorage.removeItem('rdp_admin_token');
-  $('appView').style.display = 'none'; $('loginView').style.display = 'block';
+  $('appView').style.display = 'none'; $('requiredPasswordView').style.display = 'none'; $('requiredPasswordForm').reset(); $('requiredError').textContent = ''; $('lPass').value = ''; $('loginView').style.display = 'block';
 }
 
 async function showApp() {
-  $('loginView').style.display = 'none'; $('appView').style.display = 'block';
-  try { const { user } = await api('/me'); me = user; $('whoAmI').textContent = `Вы вошли: ${user.full_name || user.username} (${user.role === 'admin' ? 'администратор' : 'сотрудник'})`; } catch {}
-  refresh();
+  $('loginView').style.display = 'none'; $('appView').style.display = 'none'; $('requiredPasswordView').style.display = 'none';
+  try {
+    const { user } = await api('/me'); me = user;
+    if (user.role !== 'admin') { logout(); toast('Панель доступна только администраторам'); return; }
+    if (user.must_change_password) { $('requiredPasswordView').style.display = 'block'; $('requiredCurrent').focus(); return; }
+    $('appView').style.display = 'block';
+    $('whoAmI').textContent = `Вы вошли: ${user.full_name || user.username} (администратор)`;
+    refresh();
+  } catch (e) { logout(); toast(e.message); }
 }
+$('requiredLogout').addEventListener('click', logout);
+$('requiredPasswordForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const current = $('requiredCurrent').value, next = $('requiredNew').value;
+  const error = $('requiredError'); error.textContent = '';
+  if (next.length < 6) { error.textContent = 'Новый пароль — минимум 6 символов'; return; }
+  if (next !== $('requiredConfirm').value) { error.textContent = 'Пароли не совпадают'; return; }
+  $('requiredSubmit').disabled = true;
+  const activeToken = token;
+  try {
+    const result = await api('/change-password', { method: 'POST', body: { current_password: current, new_password: next } });
+    if (token !== activeToken) return;
+    if (!result.token) throw new Error('Сервер не вернул новый токен. Войдите снова.');
+    token = result.token; sessionStorage.setItem('rdp_admin_token', token);
+    $('requiredPasswordForm').reset(); $('lPass').value = ''; await showApp();
+  } catch (e) { if (token === activeToken) error.textContent = e.message; }
+  finally { $('requiredSubmit').disabled = false; }
+});
 
 async function refresh() {
   try {

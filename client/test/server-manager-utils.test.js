@@ -50,3 +50,20 @@ test('semantic version comparison detects newer server/client releases', () => {
   assert.equal(compareVersions('1.3.5', 'v1.3.5'), 0);
   assert.equal(compareVersions('1.2.9', '1.3.0'), -1);
 });
+
+test('server panel URL follows service XML, supports TLS and rejects unsafe settings', () => {
+  const { serverPanelUrl } = require('../server-manager-utils');
+  const xml = (body = '') => `<service>${body}</service>`;
+  const env = (name, value) => `<env name="${name}" value="${value}" />`;
+  assert.equal(serverPanelUrl(xml(), {}), 'http://127.0.0.1:8720/');
+  assert.equal(serverPanelUrl(xml(env('RDP_MANAGER_PORT', '9999') + env('RDP_MANAGER_HOST', '192.0.2.2')), {}), 'http://192.0.2.2:9999/');
+  assert.equal(serverPanelUrl(xml(env('RDP_MANAGER_HOST', '::') + env('RDP_MANAGER_TLS_CERT', 'cert.pem') + env('RDP_MANAGER_TLS_KEY', 'key.pem')), {}), 'https://[::1]:8720/');
+  assert.equal(serverPanelUrl(xml(env('RDP_MANAGER_PORT', '%MY_PORT%')), { MY_PORT: '4321', RDP_MANAGER_TLS_CERT: 'a', RDP_MANAGER_TLS_KEY: 'b' }), 'https://127.0.0.1:4321/');
+  assert.throws(() => serverPanelUrl(xml(env('RDP_MANAGER_PORT', '0')), {}));
+  assert.throws(() => serverPanelUrl(xml(env('RDP_MANAGER_HOST', 'example.com@evil.com')), {}));
+  assert.throws(() => serverPanelUrl(xml(env('RDP_MANAGER_TLS_CERT', 'a')), {}));
+  assert.throws(() => serverPanelUrl(xml(env('RDP_MANAGER_PORT', '%MISSING%')), {}));
+  assert.throws(() => serverPanelUrl(xml(env('RDP_MANAGER_PORT', '1') + env('RDP_MANAGER_PORT', '2')), {}));
+  assert.throws(() => serverPanelUrl('<!DOCTYPE service><service/>', {}));
+  assert.throws(() => serverPanelUrl('<service><env>', {}));
+});

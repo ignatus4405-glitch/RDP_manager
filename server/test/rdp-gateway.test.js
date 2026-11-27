@@ -33,6 +33,7 @@ const { rdpTickets } = require('../src/rdp-tickets');
 const { WebSocket } = require('ws');
 
 before(() => {
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = 1').run();
   db.prepare(
     `INSERT INTO connections (type, name, address, port, category, tags, username, description)
      VALUES ('rdp', 'Тестовый узел', '192.168.55.10', 3389, 'Тест', '', 'ivanov', '')`
@@ -144,6 +145,10 @@ test('WebSocket принимает только одноразовый тике�
   const token = signToken({ sub: 1, username: 'admin', role: 'admin', ver: 0 });
   assert.match(await rawUpgrade(`?token=${encodeURIComponent(token)}`), /^HTTP\/1\.1 401/);
   const issue = () => rdpTickets.issue({ userId: 1, tokenVersion: 0, connectionId: 1, ip: '127.0.0.1' });
+  const blockedTicket = issue();
+  db.prepare('UPDATE users SET must_change_password = 1 WHERE id = 1').run();
+  assert.match(await rawUpgrade(`?ticket=${blockedTicket}`), /^HTTP\/1\.1 401/);
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = 1').run();
   const ticket = issue();
   assert.match(await rawUpgrade(`?ticket=${ticket}`), /^HTTP\/1\.1 101/);
   assert.match(await rawUpgrade(`?ticket=${ticket}`), /^HTTP\/1\.1 401/);
