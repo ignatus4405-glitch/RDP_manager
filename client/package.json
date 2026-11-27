@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
-    "electron": "45.3.3",
+    "electron": "45.4.1",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "ironrdp-wasm": "^1.3.0"
