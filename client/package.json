@@ -14,7 +14,7 @@
     "build:ssh": "node scripts/build-ssh.js"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.16.0",
+    "@bufbuild/protobuf": "^2.17.0",
     "@xmldom/xmldom": "^0.8.15",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
