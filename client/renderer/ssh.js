@@ -17,7 +17,7 @@
     close(); const revision = ++generation; conn = connection;
     $('sshName').textContent = `${connection.type === 'ssh' ? 'SSH' : 'SFTP'} · ${connection.name}`;
     $('sshUsername').value = connection.username || ''; $('sshPassword').value = ''; passwordTouched = false;
-    $('sshError').textContent = ''; $('sshConnect').disabled = false; $('sshForm').classList.remove('hidden'); $('sshTerminal').classList.add('hidden'); $('sftpPanel').classList.add('hidden');
+    $('sshError').textContent = ''; $('sshConnect').disabled = false; $('sshForm').classList.remove('hidden'); $('sshTerminalPanel').classList.add('hidden'); $('sftpPanel').classList.add('hidden');
     $('sshOverlay').classList.remove('hidden'); status('Не подключено'); $('sshPassword').focus();
     if (connection.has_secret && loadSecret) loadSecret().then((password) => {
       if (generation === revision && conn === connection && !passwordTouched && typeof password === 'string') $('sshPassword').value = password;
@@ -378,6 +378,37 @@
     } catch (error) { if (id === active) { transferring = false; await showDirectory(target); message(`Ошибка вставки: ${error.message}`, true); } }
     finally { if (id === active) { transferring = false; updateActions(); $('sftpProgress').classList.add('hidden'); } }
   }
+  // Keep Ctrl+C as the terminal interrupt. Pasting text containing newlines
+  // may execute commands immediately; obtain consent before sending it.
+  function pasteText(text, active, target) {
+    if (!active || id !== active || !target || terminal !== target || typeof text !== 'string' || !text) return;
+    if (new TextEncoder().encode(text).length > 60000) { status('Текст для вставки превышает 60 000 байт.', true); return; }
+    if (/[\r\n]/.test(text) && !window.confirm('Текст содержит несколько строк. Вставка может сразу выполнить команды на сервере. Продолжить?')) return;
+    if (id !== active || terminal !== target) return;
+    target.paste(text); target.focus();
+  }
+  async function pasteTerminal() {
+    const active = id, target = terminal; if (!active || !target) return;
+    try { const text = await window.rdpManager.readClipboard(); pasteText(text, active, target); }
+    catch (error) { if (id === active && terminal === target) status(`Не удалось прочитать буфер: ${error.message}`, true); }
+  }
+  async function copyTerminal() {
+    const active = id, target = terminal; if (!active || !target) return;
+    const selected = target.getSelection(); if (!selected) { status('Выделите текст для копирования.', true); return; }
+    try { await window.rdpManager.writeClipboard(selected); if (id === active && terminal === target) target.focus(); }
+    catch (error) { if (id === active && terminal === target) status(`Не удалось скопировать текст: ${error.message}`, true); }
+  }
+  $('sshPaste').addEventListener('click', () => void pasteTerminal());
+  $('sshCopy').addEventListener('click', () => void copyTerminal());
+  $('sshSelectAll').addEventListener('click', () => { if (terminal && id) { terminal.selectAll(); terminal.focus(); } });
+  $('sshClear').addEventListener('click', () => { if (terminal && id) { terminal.clear(); terminal.focus(); } });
+  $('sshTerminal').addEventListener('contextmenu', (event) => { if (!terminal || !id) return; event.preventDefault(); void pasteTerminal(); });
+  $('sshTerminal').addEventListener('paste', (event) => {
+    if (!terminal || !id) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const text = event.clipboardData?.getData('text/plain');
+    if (typeof text === 'string') pasteText(text, id, terminal); else void pasteTerminal();
+  }, true);
   function onEvent(event) {
     if (pending && !id) { earlyEvents.push(event); return; }
     if (!id || event.id !== id) return;
@@ -385,16 +416,26 @@
       $('sshForm').classList.add('hidden'); $('sshPassword').value = ''; status('Подключено');
       if (conn.type === 'ssh') {
         if (!window.SshTerminal) { status('Терминал не собран.', true); return; }
-        $('sshTerminal').classList.remove('hidden'); terminal = new window.SshTerminal.Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000 });
+        $('sshTerminalPanel').classList.remove('hidden'); terminal = new window.SshTerminal.Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000 });
         fit = new window.SshTerminal.FitAddon(); terminal.loadAddon(fit); terminal.open($('sshTerminal')); fit.fit();
-        terminal.onData((data) => { if (id) void window.rdpManager.ssh.write(id, data).catch((error) => status(error.message, true)); });
+        const activeTerminal = terminal, activeId = id;
+        terminal.attachCustomKeyEventHandler((event) => {
+          const key = event.key.toLowerCase();
+          const isV = event.code === 'KeyV' || key === 'v', isC = event.code === 'KeyC' || key === 'c';
+          const paste = !event.altKey && !event.metaKey && ((event.ctrlKey && isV) || (!event.ctrlKey && event.shiftKey && key === 'insert'));
+          const copy = !event.altKey && !event.metaKey && event.ctrlKey && ((event.shiftKey && isC) || (!event.shiftKey && key === 'insert'));
+          if (!paste && !copy) return true;
+          event.preventDefault(); if (event.type === 'keydown') { if (paste) void pasteTerminal(); else void copyTerminal(); } return false;
+        });
+        terminal.onSelectionChange(() => { if (id !== activeId || terminal !== activeTerminal) return; const text = activeTerminal.getSelection(); if (text) void window.rdpManager.writeClipboard(text).catch((error) => { if (id === activeId && terminal === activeTerminal) status(`Не удалось скопировать текст: ${error.message}`, true); }); });
+        terminal.onData((data) => { if (id === activeId && terminal === activeTerminal) void window.rdpManager.ssh.write(activeId, data).catch((error) => { if (id === activeId && terminal === activeTerminal) status(error.message, true); }); });
         void window.rdpManager.ssh.resize(id, terminal.cols, terminal.rows).catch(() => {}); terminal.focus();
       } else { $('sftpPanel').classList.remove('hidden'); $('sftpRemoteHost').textContent = `${conn.address}:${conn.port || 22}`; $('sftpProgress').classList.add('hidden'); message('Подключено'); void showLocal(null); void showDirectory('.'); }
     } else if (event.type === 'data') terminal?.write(new Uint8Array(event.bytes));
     else if (event.type === 'progress') { const text = `Передача: ${formatSize(event.done)} / ${formatSize(event.total)}`; message(text); $('sftpProgress').value = event.total > 0 ? Math.min(100, event.done / event.total * 100) : 0; }
     else if (event.type === 'error' || event.type === 'close') {
       hideContextMenu(); if ($('sftpOperationDialog').open) $('sftpOperationDialog').close(); operationState = null; if (propertiesState) { propertiesState.token = null; propertiesState.saving = false; $('sftpPropertiesSave').disabled = true; $('sftpPropertiesError').textContent = 'Соединение закрыто.'; } if (editState) { editState.token = null; editState.saving = false; $('sftpEditorText').disabled = !editState.loaded; $('sftpEditorSave').disabled = true; $('sftpEditorError').textContent = 'Соединение закрыто. Скопируйте несохранённый текст перед закрытием.'; } if ($('sftpNewFolderDialog').open) $('sftpNewFolderDialog').close(); folderTarget = null; id = null; transferring = false; updateActions(); if (terminal) terminal.dispose(); terminal = null; fit = null;
-      $('sshTerminal').classList.add('hidden'); $('sftpPanel').classList.add('hidden'); $('sshForm').classList.remove('hidden'); $('sshConnect').disabled = false;
+      $('sshTerminalPanel').classList.add('hidden'); $('sftpPanel').classList.add('hidden'); $('sshForm').classList.remove('hidden'); $('sshConnect').disabled = false;
       const message = event.type === 'error' ? event.message : 'Соединение закрыто'; $('sshError').textContent = message; status(message, event.type === 'error');
     }
   }
