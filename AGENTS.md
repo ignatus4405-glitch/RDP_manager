@@ -4,7 +4,7 @@
 
 ## Что это за проект
 RDP Manager — система единого доступа к инфраструктуре для компании:
-- **server/** — отдельная серверная программа: REST API + SQLite, база подключений RDP/AnyDesk/RustDesk, документация, учётные записи (admin/employee). Встроенная веб-панель (`/`) и веб-режим клиента (`/app/`).
+- **server/** — отдельная серверная программа: REST API + SQLite, база подключений RDP/AnyDesk/RustDesk, документация, учётные записи (admin/employee). Встроенная веб-панель (`/`); `/app/` доступен только если рядом существуют исходники renderer клиента и не входит в установленный SEA-пакет.
 - **client/** — Electron-клиент сотрудников и отдельный GUI-компаньон для Windows-службы: управление службой, окно логов и системный трей.
 
 Стек: Node.js ≥ 22.5, Express 4, встроенный `node:sqlite` (без нативных модулей), Electron + electron-builder + electron-updater. Для встроенного RDP — IronRDP (WebAssembly) + RDCleanPath поверх WebSocket (шлюз на сервере, без нативных модулей). Внешних сервисов нет — всё самодельное, работает в закрытой сети (кроме проверки обновлений GitHub).
@@ -28,7 +28,7 @@ RDP Manager — система единого доступа к инфрастр
 
 ## Карта файлов
 ```
-server/src/index.js   — HTTP-сервер, статика панели (/) и веб-клиента (/app/), WebSocket-upgrade, запуск файлового логгера
+server/src/index.js   — HTTP-сервер, статика панели (/) и необязательного dev-веб-клиента (/app/), WebSocket-upgrade, запуск файлового логгера
 server/src/file-logger.js — файловый `server.log` с ротацией (включается `RDP_MANAGER_LOG_DIR`; в Windows Service лежит в ProgramData)
 server/src/api.js     — все маршруты /api: login, change-password, users CRUD, connections CRUD + /meta, documents CRUD, stats
 server/src/db.js      — схема SQLite, seed admin, scrypt hash/verify, секрет токенов (data/secret.key)
@@ -88,7 +88,7 @@ release-please-config.json / .release-please-manifest.json — конфигур�
 5. **Токены**: секрет подписи лежит в `server/data/secret.key` (создаётся при первом старте, НЕ коммитится; можно переопределить env `RDP_MANAGER_SECRET`). Если ключ удалить — все выданные токены перестанут быть валидными, пользователи просто войдут заново.
 6. **БД и `must_change_password`**: свежий сервер всегда создаёт `admin/admin123` с обязательной сменой. Не коммитьте `server/data/`.
 7. **Версии**: обновлять вручную только в release PR — синхронно в root/client/server `package.json`, `package-lock.json`, release manifest и CHANGELOG; обычные feature/fix PR версию не меняют.
-8. **Публикация релиза** — вручную отправить тег `v*`, затем проверить assets командой `gh release view vX.Y.Z`. Build публикует единый Windows NSIS, AppImage, Linux server tar.gz и `latest*.yml` через `softprops/action-gh-release` (НЕ `electron-builder --publish`). `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js`. **Секция `publish` в `build` клиента отсутствует намеренно** — при её наличии electron-builder требует GH_TOKEN даже при `--publish never`.
+8. **Публикация релиза** — вручную отправить тег `v*`, затем проверить assets командой `gh release view vX.Y.Z`. Build публикует единый Windows NSIS, AppImage, Linux server tar.gz и `latest*.yml` через `softprops/action-gh-release` (НЕ `electron-builder --publish`). `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js`. В `build.publish` клиента задан GitHub provider для electron-updater; сборка в CI получает `GH_TOKEN`, а фактическая публикация assets выполняется workflow после отправки тега.
 9. **Приватный репозиторий**: автообновление клиентов не скачает установщик анонимно — см. CONTRIBUTING.md.
 10. **Аудит**: `npm audit` показывает moderate (minimatch, build-time цепочка electron-builder) — осознанно не блокируем CI; новые high+ уязвимости чините.
 11. **electron — только в devDependencies и ТОЧНАЯ версия** (без `^`): иначе electron-builder мгновенно падает («only allowed in devDependencies» / «version is a range»). Версия electron должна совпадать с той, что скачана в node_modules.

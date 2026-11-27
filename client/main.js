@@ -10,7 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const { fileURLToPath, pathToFileURL } = require('node:url');
 const { Blob } = require('node:buffer');
-const { compareVersions, parseServiceStatus, readLogTail } = require('./server-manager-utils');
+const { compareVersions, parseServiceStatus, readLogTail, serverPanelUrl } = require('./server-manager-utils');
 const { createUpdateController } = require('./update-controller');
 const { requireWindowFrame } = require('./ipc-access');
 const { createLocalCredentials } = require('./local-credentials');
@@ -233,8 +233,14 @@ async function runServerServiceAction(action) {
 async function openServerPanel() {
   const status = await getServerServiceStatus();
   if (!status.installed || status.state !== 'running') return { ok: false, message: 'Служба не запущена.' };
-  await shell.openExternal('http://127.0.0.1:8720/');
-  return { ok: true };
+  const configPath = app.isPackaged
+    ? path.join(path.dirname(process.execPath), 'server', 'RDPManagerServer.xml')
+    : path.join(__dirname, '..', 'server', 'installer', 'windows', 'RDPManagerServer.xml');
+  try {
+    const url = serverPanelUrl(await fs.promises.readFile(configPath, 'utf8'), process.env);
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (error) { return { ok: false, message: `Не удалось определить адрес панели из настроек службы: ${error.message}` }; }
 }
 
 function getManagedServerVersion() {

@@ -33,6 +33,22 @@
   </div>
 </div>
 
+<div id="requiredPasswordView" class="login-view hidden">
+  <form id="requiredPasswordForm" class="login-card" aria-labelledby="requiredPasswordTitle">
+    <h1 id="requiredPasswordTitle">Смена пароля</h1>
+    <p class="muted">Перед продолжением необходимо сменить начальный или сброшенный пароль.</p>
+    <label for="requiredCurrentPassword">Текущий пароль</label>
+    <input id="requiredCurrentPassword" type="password" autocomplete="current-password" required />
+    <label for="requiredNewPassword">Новый пароль</label>
+    <input id="requiredNewPassword" type="password" autocomplete="new-password" minlength="6" required />
+    <label for="requiredConfirmPassword">Повторите новый пароль</label>
+    <input id="requiredConfirmPassword" type="password" autocomplete="new-password" minlength="6" required />
+    <p id="requiredPasswordError" class="login-error" role="alert"></p>
+    <button id="requiredPasswordSubmit" class="btn-primary big" type="submit">Сменить пароль</button>
+    <button id="requiredPasswordLogout" class="btn-ghost big" type="button">Выйти</button>
+  </form>
+</div>
+
 <!-- ============ Приложение ============ -->
 <div id="appView" class="app-view hidden">
 

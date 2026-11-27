@@ -323,8 +323,8 @@ function handleConnection(ws) {
       const logPrefix = `[rdp ${host}:${port}]`;
 
       // Allowlist по базе подключений — шлюз не ходит к произвольным хостам
-      const currentUser = db.prepare('SELECT disabled, token_version FROM users WHERE id = ?').get(ws.user.id);
-      if (!currentUser || currentUser.disabled || currentUser.token_version !== ws.user.token_version) {
+      const currentUser = db.prepare('SELECT disabled, must_change_password, token_version FROM users WHERE id = ?').get(ws.user.id);
+      if (!currentUser || currentUser.disabled || currentUser.must_change_password || currentUser.token_version !== ws.user.token_version) {
         ws.send(buildRDCleanPathError(1, 403)); ws.close(); return;
       }
       const row = db.prepare("SELECT address, port FROM connections WHERE id = ? AND type = 'rdp'").get(ws.connectionId);
@@ -366,8 +366,8 @@ function attachRdpGateway(server, { path: wsPath = '/ws/rdp' } = {}) {
     if (url.pathname !== wsPath) return; // не наш эндпоинт — отдаём другим обработчикам
 
     const ticket = rdpTickets.consume(url.searchParams.get('ticket'), req.socket.remoteAddress || '');
-    const user = ticket && db.prepare('SELECT id, username, role, disabled, token_version FROM users WHERE id = ?').get(ticket.userId);
-    if (!user || user.disabled || user.token_version !== ticket.tokenVersion) {
+    const user = ticket && db.prepare('SELECT id, username, role, disabled, must_change_password, token_version FROM users WHERE id = ?').get(ticket.userId);
+    if (!user || user.disabled || user.must_change_password || user.token_version !== ticket.tokenVersion) {
       console.warn('[rdp] отказ в upgrade: невалидный или отсутствующий токен');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();

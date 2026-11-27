@@ -125,6 +125,9 @@ function logout() {
   state.token = null; state.user = null;
   sessionStorage.removeItem('rdp_token');
   $('appView').classList.add('hidden');
+  $('requiredPasswordView').classList.add('hidden');
+  $('requiredPasswordForm').reset();
+  $('requiredPasswordError').textContent = '';
   $('loginView').classList.remove('hidden');
   $('loginPassword').value = '';
 }
@@ -133,6 +136,27 @@ $('btnLogin').addEventListener('click', doLogin);
 $('loginPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 $('loginUsername').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 $('btnLogout').addEventListener('click', logout);
+$('requiredPasswordLogout').addEventListener('click', logout);
+$('requiredPasswordForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const current = $('requiredCurrentPassword').value, next = $('requiredNewPassword').value;
+  const error = $('requiredPasswordError'); error.textContent = '';
+  if (next.length < 6) { error.textContent = 'Новый пароль — минимум 6 символов'; return; }
+  if (next !== $('requiredConfirmPassword').value) { error.textContent = 'Пароли не совпадают'; return; }
+  const button = $('requiredPasswordSubmit'); button.disabled = true;
+  const activeToken = state.token, activeUser = state.user;
+  try {
+    const result = await api('/change-password', { method: 'POST', body: { current_password: current, new_password: next } });
+    if (state.token !== activeToken || state.user !== activeUser) return;
+    if (!result.token) throw new Error('Сервер не вернул новый токен. Войдите снова.');
+    state.token = result.token; sessionStorage.setItem('rdp_token', result.token);
+    state.user.must_change_password = false;
+    $('requiredPasswordForm').reset(); $('loginPassword').value = '';
+    await enterApp();
+  } catch (err) { if (state.token === activeToken && state.user === activeUser) error.textContent = err.message; }
+  finally { button.disabled = false; }
+});
+
 
 /* ================= Переход между разделами ================= */
 document.querySelectorAll('.nav-item[data-view]').forEach((btn) => {
@@ -150,6 +174,11 @@ function applyRoleVisibility() {
 
 async function enterApp() {
   $('loginView').classList.add('hidden');
+  if (state.user.must_change_password) {
+    $('appView').classList.add('hidden'); $('requiredPasswordView').classList.remove('hidden');
+    $('requiredCurrentPassword').focus(); return;
+  }
+  $('requiredPasswordView').classList.add('hidden');
   $('appView').classList.remove('hidden');
   $('sideServer').textContent = state.serverUrl.replace(/^https?:\/\//, '');
   $('userName').textContent = state.user.full_name || state.user.username;

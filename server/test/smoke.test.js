@@ -108,9 +108,18 @@ test('server smoke: health → login → CRUD → защита доступа', 
   let { token, user } = await login.json();
   assert.equal(user.role, 'admin');
   assert.equal(user.must_change_password, true);
+  // First login must not provide access to any application API or RDP tickets.
+  assert.equal((await get('/api/me', token)).status, 200);
+  for (const url of ['/api/connections', '/api/documents', '/api/users', '/api/stats']) {
+    const blocked = await get(url, token);
+    assert.equal(blocked.status, 403); assert.equal((await blocked.json()).code, 'PASSWORD_CHANGE_REQUIRED');
+  }
+  assert.equal((await post('/api/rdp/ticket', { connection_id: 1 }, token)).status, 403);
   // Default admin must change their initial password before using stored secrets.
   const lockedSecret = await fetch(base + '/api/connections/1/secret', { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(lockedSecret.status, 403);
+  assert.equal((await post('/api/change-password', { current_password: 'admin123', new_password: 'admin123' }, token)).status, 400);
+  assert.equal((await get('/api/users', token)).status, 403);
   const initialToken = token;
   const passwordChanged = await post('/api/change-password', { current_password: 'admin123', new_password: 'admin456' }, token);
   assert.equal(passwordChanged.status, 200);
@@ -205,19 +214,27 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const empWriteSecret = await fetch(secretUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${empToken}` }, body: JSON.stringify({ password: 'bad' }) });
   assert.equal(empWriteSecret.status, 403);
   const empRead = await get('/api/connections', empToken);
-  assert.equal(empRead.status, 200, 'сотрудник должен видеть подключения');
+  assert.equal(empRead.status, 403, 'до смены пароля подключения недоступны');
 
   const another = await post('/api/users', { username: 'otheradmin', password: 'secret3', role: 'admin' }, token);
   const otherId = (await another.json()).user.id;
-  const otherToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret3' })).json()).token;
+  const initialOtherToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret3' })).json()).token;
+  assert.equal((await get('/api/users', initialOtherToken)).status, 403);
+  const otherChange = await post('/api/change-password', { current_password: 'secret3', new_password: 'secret5' }, initialOtherToken);
+  assert.equal(otherChange.status, 200);
+  const otherToken = (await otherChange.json()).token;
   assert.equal((await get('/api/users', otherToken)).status, 200);
   const demote = await fetch(base + '/api/users/' + otherId, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ role: 'employee' }) });
   assert.equal(demote.status, 200);
   assert.equal((await get('/api/users', otherToken)).status, 401);
-  const demotedToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret3' })).json()).token;
+  const demotedToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret5' })).json()).token;
   assert.equal((await get('/api/users', demotedToken)).status, 403);
   assert.equal((await post('/api/users/' + otherId + '/reset-password', { password: 'secret4' }, token)).status, 200);
   assert.equal((await get('/api/me', demotedToken)).status, 401);
+  const resetToken = (await (await post('/api/login', { username: 'otheradmin', password: 'secret4' })).json()).token;
+  assert.equal((await get('/api/me', resetToken)).status, 200);
+  assert.equal((await get('/api/connections', resetToken)).status, 403);
+  assert.equal((await post('/api/rdp/ticket', { connection_id: connection.id }, resetToken)).status, 403);
 
   // 6. Неверный текущий пароль не должен выглядеть как истёкшая сессия.
   const badChange = await post('/api/change-password', { current_password: 'wrong', new_password: 'secret2' }, empToken);
@@ -231,6 +248,7 @@ test('server smoke: health → login → CRUD → защита доступа', 
   const relogin = await post('/api/login', { username: 'sotrudnik', password: 'secret2' });
   assert.equal(relogin.status, 200);
   const employeeToken = (await relogin.json()).token;
+  assert.equal((await get('/api/connections', employeeToken)).status, 200);
   const employeeSecret = await get('/api/connections/' + rdConnection.id + '/secret', employeeToken);
   assert.equal((await employeeSecret.json()).password, ' SSH $пароль ');
   const disable = await fetch(base + '/api/users/' + (await emp.json()).user.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ disabled: true }) });

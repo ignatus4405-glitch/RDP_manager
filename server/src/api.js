@@ -82,6 +82,7 @@ router.post('/change-password', requireAuth, asyncRoute(async (req, res) => {
   const next = String(req.body?.new_password ?? '');
   if (current.length > 1024 || next.length > 1024) return res.status(400).json({ error: 'Пароль не должен превышать 1024 символа' });
   if (next.length < 6) return res.status(400).json({ error: 'Новый пароль должен быть не короче 6 символов' });
+  if (next === current) return res.status(400).json({ error: 'Новый пароль должен отличаться от текущего' });
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user || !await passwords.verify(current, user.password_hash)) {
