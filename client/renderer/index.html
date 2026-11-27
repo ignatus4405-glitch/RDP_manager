@@ -258,7 +258,10 @@
       <label for="sshPassword">Пароль</label><input id="sshPassword" type="password" autocomplete="off" />
       <p id="sshError" class="login-error"></p><button id="sshConnect" type="submit" class="btn-primary big">Подключиться</button>
     </form>
-    <div id="sshTerminal" class="ssh-terminal hidden"></div>
+    <div id="sshTerminalPanel" class="ssh-terminal-panel hidden">
+      <div class="ssh-terminal-toolbar"><button id="sshCopy" type="button" class="btn-ghost">Копировать</button><button id="sshPaste" type="button" class="btn-ghost">Вставить</button><button id="sshSelectAll" type="button" class="btn-ghost">Выделить всё</button><button id="sshClear" type="button" class="btn-ghost">Очистить экран</button><span class="muted">ПКМ — вставить · Ctrl+C — прервать команду</span></div>
+      <div id="sshTerminal" class="ssh-terminal"></div>
+    </div>
     <section id="sftpPanel" class="sftp-panel hidden" aria-label="Файловый менеджер SFTP">
       <div class="sftp-commandbar">
         <span class="sftp-command-label">Файловый менеджер <small>SFTP</small></span>

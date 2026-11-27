@@ -313,7 +313,11 @@ button { font-family: inherit; cursor: pointer; }
 
 /* SSH terminal and SFTP file list */
 .conn-type.ssh, .conn-type.sftp { background: #60a5fa22; color: #93c5fd; border: 1px solid #60a5fa44; }
-.ssh-terminal { width: 100%; height: 100%; padding: 12px; background: #000; overflow: hidden; }
+.ssh-terminal-panel { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: #000; }
+.ssh-terminal-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 12px; background: var(--panel); }
+.ssh-terminal-toolbar button { padding: 5px 10px; font-size: 12px; }
+.ssh-terminal-toolbar span { font-size: 11px; }
+.ssh-terminal { flex: 1; min-height: 0; width: 100%; padding: 12px; background: #000; overflow: hidden; }
 .sftp-panel { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: #0d121c; overflow: hidden; }
 .sftp-commandbar { min-height: 62px; display: flex; align-items: center; gap: 20px; padding: 10px 18px; border-bottom: 1px solid #263449; background: #151e2c; }
 .sftp-command-label { color: #e5edf9; font-size: 14px; font-weight: 700; white-space: nowrap; }
