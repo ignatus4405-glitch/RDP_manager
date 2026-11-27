@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const workflow = fs.readFileSync(path.join(__dirname, '../../.github/workflows/build.yml'), 'utf8');
+const workflow = fs.readFileSync(path.join(__dirname, '../../.github/workflows/build.yml'), 'utf8').replace(/\r\n/g, '\n');
 
 test('tag release is published by one job after all build artifacts are checked', () => {
   assert.equal((workflow.match(/uses: softprops\/action-gh-release@v2/g) || []).length, 1);
