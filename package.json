@@ -1,6 +1,6 @@
 {
   "name": "rdp-manager",
-  "version": "1.4.25",
+  "version": "1.4.26",
   "private": true,
   "description": "RDP Manager — централизованное хранилище RDP / AnyDesk / RustDesk подключений с документацией",
   "workspaces": [
