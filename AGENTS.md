@@ -90,7 +90,7 @@ release-please-config.json / .release-please-manifest.json — конфигур�
 7. **Версии**: обновлять вручную только в release PR — синхронно в root/client/server `package.json`, `package-lock.json`, release manifest и CHANGELOG; обычные feature/fix PR версию не меняют.
 8. **Публикация релиза** — вручную отправить тег `v*`, затем проверить assets командой `gh release view vX.Y.Z`. Build публикует единый Windows NSIS, AppImage, Linux server tar.gz и `latest*.yml` через `softprops/action-gh-release` (НЕ `electron-builder --publish`). `latest.yml`/`latest-linux.yml` генерирует `client/scripts/make-latest-yml.js`. В `build.publish` клиента задан GitHub provider для electron-updater; сборка в CI получает `GH_TOKEN`, а фактическая публикация assets выполняется workflow после отправки тега.
 9. **Приватный репозиторий**: автообновление клиентов не скачает установщик анонимно — см. CONTRIBUTING.md.
-10. **Аудит**: `npm audit` показывает moderate (minimatch, build-time цепочка electron-builder) — осознанно не блокируем CI; новые high+ уязвимости чините.
+10. **Аудит**: `npm audit --audit-level=high` блокирует CI при high/critical; moderate выводятся в отчёте, но не блокируют. Ошибка обращения к npm также делает проверку неуспешной. Зависимости автоматически проверяются Dependabot; каждый PR нужно проверять перед слиянием.
 11. **electron — только в devDependencies и ТОЧНАЯ версия** (без `^`): иначе electron-builder мгновенно падает («only allowed in devDependencies» / «version is a range»). Версия electron должна совпадать с той, что скачана в node_modules.
 12. **electron-updater в dependencies** клиента (не dev) — он нужен в собранном приложении. `electron-builder` и `electron` — devDependencies.
 
